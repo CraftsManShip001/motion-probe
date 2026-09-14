@@ -1,0 +1,13 @@
+{
+  "schema": "motion-probe/spec@1",
+  "expectations": [
+    {
+      "target": "layout-panel",
+      "prop": "boundsWidth",
+      "from": 80,
+      "to": 300,
+      "durationMs": { "min": 250, "max": 450 },
+      "maxStalls": 0
+    }
+  ]
+}

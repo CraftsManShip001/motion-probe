@@ -1,0 +1,8 @@
+{
+  "schema": "motion-probe/spec@1",
+  "expectations": [
+    { "target": "scroll-item", "prop": "scrollY", "from": 0, "to": 120, "maxStalls": 0 },
+    { "target": "scroll-item", "prop": "top", "shouldMove": false },
+    { "target": "scroll-item", "minFinalVisibleRatio": 0.99 }
+  ]
+}

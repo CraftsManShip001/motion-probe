@@ -1,0 +1,7 @@
+{
+  "schema": "motion-probe/spec@1",
+  "expectations": [
+    { "target": "spring-badge", "prop": "scaleX", "from": 1, "to": 1.3, "settleMs": { "max": 2000 } },
+    { "target": "spring-badge", "minFinalVisibleRatio": 0.99 }
+  ]
+}

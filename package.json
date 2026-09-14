@@ -1,0 +1,24 @@
+{
+  "name": "motion-probe-monorepo",
+  "private": true,
+  "description": "Agent-friendly animation verification for React Native: native UI-layer probe + CLI + JSON reports.",
+  "workspaces": [
+    "packages/core",
+    "packages/cli",
+    "packages/mcp",
+    "packages/react-native",
+    "examples/demo"
+  ],
+  "scripts": {
+    "build": "npm run build -w @motion-probe/core && npm run build -w @motion-probe/cli && npm run build -w @motion-probe/mcp",
+    "test": "vitest run",
+    "typecheck": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/cli/tsconfig.json --noEmit && tsc -p packages/mcp/tsconfig.json --noEmit",
+    "probe": "node packages/cli/dist/cli.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.0"
+  }
+}

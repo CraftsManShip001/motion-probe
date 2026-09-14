@@ -1,0 +1,7 @@
+{
+  "schema": "motion-probe/spec@1",
+  "expectations": [
+    { "target": "toast", "prop": "translateY", "from": 60, "to": 8, "durationMs": 250 },
+    { "target": "toast", "minFinalVisibleRatio": 0.99 }
+  ]
+}

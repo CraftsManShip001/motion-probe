@@ -1,0 +1,16 @@
+{
+  "schema": "motion-probe/spec@1",
+  "expectations": [
+    {
+      "target": "timing-card",
+      "prop": "translateX",
+      "from": 0,
+      "to": 200,
+      "durationMs": 300,
+      "easing": "cubic-out",
+      "maxOvershootPct": 0,
+      "maxStalls": 0
+    },
+    { "target": "timing-card", "prop": "opacity", "from": 0.3, "to": 1, "durationMs": 200, "easing": "linear" }
+  ]
+}
