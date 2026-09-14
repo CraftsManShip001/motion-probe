@@ -76,7 +76,7 @@ class MotionRecorder : Choreographer.FrameCallback {
     endReason = ""
 
     val root = activity?.window?.decorView
-    targets.forEachIndexed { i, id -> views[i] = WeakReference(root?.let { findView(it, id) }) }
+    targets.forEachIndexed { i, id -> views[i] = WeakReference<View>(root?.let { findView(it, id) }) }
 
     startNanos = System.nanoTime()
     running = true
