@@ -5,16 +5,23 @@
 화면 녹화를 프레임 이미지로 읽는 대신, 네이티브 뷰 레이어가 **실제로 렌더링하는 상태**(위치·transform·opacity·보이는 면적)를 매 디스플레이 프레임마다 기록합니다. 그 결과를 "무엇이 어디서 어디로, 몇 ms 동안, 어떤 곡선으로, 끊김·잘림 없이 움직였나"로 요약해서 텍스트 몇 줄 / JSON / OpenTelemetry로 돌려줍니다.
 
 ```
-$ npx motion-probe record -t toast --trigger "xcrun simctl openurl booted motionprobe-demo://run/clipped-toast"
+$ npx motion-probe arm -t toast            # 프로브를 걸어 두고, 앱에서 토스트를 띄운다 (탭·딥링크·다른 MCP 무엇이든)
+{"sessionId":"28fe1f35","found":["toast"],"missing":[]}
 
-motion-probe · ios · 700ms (settled) · 60fps · dropped 0
+$ npx motion-probe report 28fe1f35 --spec examples/demo/specs/clipped-toast.spec.json
+
+motion-probe · ios (iPhone 17 Pro) · 8236.1ms (settled) · 60fps · dropped 0
 ■ toast ⚠
-  translateY   60 → 30            @50ms  250ms  cubic-out (rmse 0) ≈ cubic-bezier(0.335,1.005,0.67,1)
-  visible      min 0% · final 68% · ⚠ clipped 0–700ms (min 0%)
+  translateY   60 → 30            @7536.1ms  266.7ms  ease-out (rmse 0.034) ≈ cubic-bezier(0,-0.285,0.355,1.005)
+  visible      min 0% · final 68% · ⚠ clipped 0–8236.1ms (min 0%)
 issues: clipped-at-end(toast)
+
+FAIL 0/2 expectations
+  ✗ toast.translateY: translateY ended at 30, expected 8±2
+  ✗ toast: "toast" ends 68% visible (expected ≥ 99%): 32% clipped
 ```
 
-<!-- TODO: replace with a real simulator recording (this output is from the CLI integration test with a simulated app) -->
+<sub>iPhone 17 Pro 시뮬레이터(iOS 26.5)에서 데모 앱의 clipped-toast 시나리오를 실제로 기록한 출력입니다. `arm` 뒤 Run 버튼을 누르기까지 걸린 시간 때문에 애니메이션이 7.5초 지점(@7536ms)에서 시작합니다.</sub>
 
 > 값(`translateY 60 → 30`)만 보면 정상이지만, 부모의 `overflow: hidden` 때문에 토스트가 **32% 잘린 채로 끝난다**는 사실까지 드러납니다. JS 값 추적(Reanimated/Animated 훅)으로는 원리상 보이지 않는 버그입니다.
 
