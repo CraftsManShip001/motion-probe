@@ -15,5 +15,19 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.json"
+  },
+  "keywords": ["react-native", "animation", "motion", "testing", "opentelemetry", "agent"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CraftsManShip001/motion-probe.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/CraftsManShip001/motion-probe#readme",
+  "bugs": "https://github.com/CraftsManShip001/motion-probe/issues",
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

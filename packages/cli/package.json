@@ -23,5 +23,19 @@
   "dependencies": {
     "@motion-probe/core": "0.1.0",
     "ws": "^8.21.3"
+  },
+  "keywords": ["react-native", "animation", "motion", "testing", "cli", "agent"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CraftsManShip001/motion-probe.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/CraftsManShip001/motion-probe#readme",
+  "bugs": "https://github.com/CraftsManShip001/motion-probe/issues",
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

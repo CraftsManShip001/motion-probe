@@ -3,22 +3,37 @@
   "version": "0.1.0",
   "description": "Native UI-layer animation probe for React Native. Records what the view layer actually renders, frame by frame.",
   "license": "MIT",
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
   "react-native": "src/index.ts",
   "files": [
+    "build",
     "src",
     "ios",
     "android",
     "!android/build",
+    "!android/.gradle",
     "expo-module.config.json"
   ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
   "keywords": ["react-native", "expo", "animation", "testing", "agent", "llm"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CraftsManShip001/motion-probe.git",
+    "directory": "packages/react-native"
+  },
+  "homepage": "https://github.com/CraftsManShip001/motion-probe#readme",
+  "bugs": "https://github.com/CraftsManShip001/motion-probe/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@motion-probe/core": "0.1.0"
+  },
   "peerDependencies": {
     "expo": "*",
     "react-native": "*"
-  },
-  "devDependencies": {
-    "@motion-probe/core": "0.1.0"
   }
 }

@@ -18,5 +18,19 @@
     "@motion-probe/cli": "0.1.0",
     "@motion-probe/core": "0.1.0",
     "zod": "^3.25.76"
+  },
+  "keywords": ["mcp", "react-native", "animation", "testing", "agent", "claude"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CraftsManShip001/motion-probe.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://github.com/CraftsManShip001/motion-probe#readme",
+  "bugs": "https://github.com/CraftsManShip001/motion-probe/issues",
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

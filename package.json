@@ -10,9 +10,9 @@
     "examples/demo"
   ],
   "scripts": {
-    "build": "npm run build -w @motion-probe/core && npm run build -w @motion-probe/cli && npm run build -w @motion-probe/mcp",
+    "build": "npm run build -w @motion-probe/core && npm run build -w @motion-probe/cli && npm run build -w @motion-probe/mcp && npm run build -w @motion-probe/react-native",
     "test": "vitest run",
-    "typecheck": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/cli/tsconfig.json --noEmit && tsc -p packages/mcp/tsconfig.json --noEmit",
+    "typecheck": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/cli/tsconfig.json --noEmit && tsc -p packages/mcp/tsconfig.json --noEmit && tsc -p packages/react-native/tsconfig.json --noEmit",
     "probe": "node packages/cli/dist/cli.js"
   },
   "devDependencies": {
