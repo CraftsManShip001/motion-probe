@@ -38,6 +38,11 @@ function connectFakeApp(port: number, behavior: 'record' | 'hang' | 'disconnect'
     socket.on('message', (data) => {
       const message = JSON.parse(String(data)) as DaemonToApp;
       app.received.push(message);
+      if (message.type === 'command') {
+        const handled = message.name === 'open-sheet';
+        socket.send(JSON.stringify({ type: 'command-result', commandId: message.commandId, handled }));
+        return;
+      }
       if (message.type !== 'arm') return;
       socket.send(JSON.stringify({ type: 'armed', sessionId: message.sessionId, found: message.targets, missing: [] }));
       if (behavior === 'record') {
@@ -101,6 +106,37 @@ describe('recordMotion (daemon ↔ app protocol)', () => {
     const error = await recordMotion(client, { targets: ['toast'], waitAppMs: 300, log: quiet }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(CliError);
     expect(String((error as Error).message)).toMatch(/installMotionProbe/);
+  });
+
+  it('performs the interaction with an app command', async () => {
+    const client = await setup();
+    await recordMotion(client, { targets: ['toast'], command: 'open-sheet', waitAppMs: 2000, log: quiet });
+    expect(app!.received.map((m) => m.type)).toEqual(['arm', 'command']);
+  });
+
+  it('cancels the recording when the app has no handler for the command', async () => {
+    const client = await setup('hang');
+    await expect(recordMotion(client, { targets: ['toast'], command: 'nope', waitAppMs: 2000, log: quiet })).rejects.toThrow(
+      /no handler/,
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    expect(app!.received.map((m) => m.type)).toEqual(['arm', 'command', 'cancel']);
+  });
+
+  it('forwards named commands to the app and rejects unknown ones', async () => {
+    const client = await setup();
+    await expect(client.command('open-sheet')).resolves.toMatchObject({ handled: true });
+    expect(app!.received.at(-1)).toMatchObject({ type: 'command', name: 'open-sheet' });
+    await expect(client.command('close-everything')).rejects.toThrow(/no handler/);
+    // Apps can be picked by platform as well as by connection id.
+    await expect(client.command('open-sheet', 'ios')).resolves.toMatchObject({ handled: true });
+    await expect(client.command('open-sheet', 'android')).rejects.toThrow(/no app connected/);
+  });
+
+  it('refuses commands when no app is connected', async () => {
+    daemon = await startDaemon({ port: 0, log: quiet });
+    const client = new DaemonClient(`http://127.0.0.1:${daemon.port}`);
+    await expect(client.command('open-sheet')).rejects.toThrow(/no app connected/);
   });
 
   it('reports daemon status with connected apps', async () => {

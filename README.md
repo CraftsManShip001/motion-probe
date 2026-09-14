@@ -68,12 +68,29 @@ import { installMotionProbe } from '@motion-probe/react-native';
 if (__DEV__) installMotionProbe();
 ```
 
+선택: 스크립트나 에이전트가 `motion-probe send open-sheet`로 부를 수 있는 테스트 훅을 등록해 두면, 딥링크나 UI 자동화 없이 인터랙션을 결정적으로 일으킬 수 있습니다.
+
+```ts
+import { onMotionProbeCommand } from '@motion-probe/react-native';
+
+useEffect(
+  () =>
+    onMotionProbeCommand((name) => {
+      if (name !== 'open-sheet') return false; // 모르는 명령
+      setSheetOpen(true);
+    }),
+  [],
+);
+```
+
 검증할 뷰에 `testID`만 있으면 됩니다. 네이티브 코드가 들어가므로 앱을 한 번 다시 빌드해야 하고, Expo Go에서는 동작하지 않습니다. iOS 모듈은 Debug 구성에만 등록됩니다(`debugOnly`).
 
 ### 2. 녹화 + 트리거 + 판정
 
 ```sh
-# 인터랙션을 일으키는 명령은 무엇이든 됩니다: deep link, maestro, adb input ...
+# 앱이 등록한 명령으로 조작 (딥링크 확인창·UI 자동화가 필요 없어 가장 결정적)
+npx motion-probe record -t sheet,backdrop --send open-sheet --spec sheet.spec.json
+# 인터랙션을 일으키는 셸 명령도 무엇이든 됩니다: maestro, adb input, deep link ...
 npx motion-probe record -t sheet,backdrop --trigger "maestro test open-sheet.yaml" --spec sheet.spec.json
 ```
 
@@ -143,8 +160,9 @@ npx motion-probe record --spec specs/motion.spec.json --trigger "..."
 
 | 도구 | 용도 |
 |---|---|
-| `motion_record` | arm → trigger 실행 → settle 대기 → 리포트(+ spec 판정) |
+| `motion_record` | arm → command/trigger 실행 → settle 대기 → 리포트(+ spec 판정) |
 | `motion_arm` / `motion_report` | 조작을 다른 MCP(Maestro, mobile-mcp 등)로 할 때 |
+| `motion_send` | 앱이 `onMotionProbeCommand`로 등록한 명령 실행 |
 | `motion_baseline` | 방금 녹화한 세션으로 회귀 스펙 생성 |
 | `motion_spec_from_tokens` | 디자인 모션 토큰으로 스펙 생성 |
 | `motion_analyze` | 저장된 trace 재분석 |
@@ -159,7 +177,8 @@ MCP 서버가 살아 있는 동안 데몬도 함께 떠 있어서, 앱 연결이
 ```sh
 npx motion-probe serve &
 npx motion-probe arm -t sheet        # {"sessionId":"ab12cd34",...}
-# ...Maestro / agent-device / mobile-mcp 등으로 탭...
+# ...Maestro / agent-device / mobile-mcp 등으로 탭, 또는 앱 명령 실행:
+npx motion-probe send open-sheet
 npx motion-probe report ab12cd34 --format json
 ```
 
@@ -191,12 +210,12 @@ npm run build        # core, cli, mcp
 npm run typecheck
 npm test             # 분석기 단위 테스트 + 데몬/프로토콜 통합 테스트 (기기 불필요)
 
-# 데모 앱 (iOS 시뮬레이터)
-cd examples/demo && npx expo run:ios
-./scripts/verify.sh   # 시나리오 8개 녹화·판정 (버그 시나리오 3개는 FAIL이 정상)
+# 데모 앱 (iOS 시뮬레이터 또는 Android 에뮬레이터 — Android는 adb reverse tcp:7357 tcp:7357)
+cd examples/demo && npx expo run:ios      # 또는 npx expo run:android
+./scripts/verify.sh   # 시나리오 8개 녹화·판정. 버그 시나리오 3개는 FAIL이 정상이고, 기대와 다르면 exit 1
 ```
 
-데모 deep link: `motionprobe-demo://run/<timing|spring|native-driver|clipped-toast|js-jank|covered-badge|scroll|layout|all>`, `motionprobe-demo://reset/<...>`
+데모 명령: `motion-probe send run/<timing|spring|native-driver|clipped-toast|js-jank|covered-badge|scroll|layout|all>`, `reset/<...>`. 같은 이름의 deep link(`motionprobe-demo://run/...`)도 동작하지만, iOS 시뮬레이터는 `simctl openurl`마다 확인창을 띄워 자동화에는 맞지 않습니다.
 
 ## 상태
 

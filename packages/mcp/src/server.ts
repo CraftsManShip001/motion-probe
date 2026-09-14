@@ -72,7 +72,10 @@ const recordingInput = {
   idleMs: z.number().int().min(50).optional().describe('Stop after no change for this long once motion started (default 300).'),
   timeoutMs: z.number().int().min(100).optional().describe('Give up if nothing moves within this time (default 5000).'),
   maxDurationMs: z.number().int().min(100).optional().describe('Hard cap on recording length (default 15000).'),
-  app: z.string().optional().describe('App connection id from motion_status when several apps are connected (default: latest).'),
+  app: z
+    .string()
+    .optional()
+    .describe('App connection id from motion_status, or a platform (ios | android), when several apps are connected (default: latest).'),
   occlusionGrid: z
     .number()
     .int()
@@ -111,13 +114,17 @@ server.registerTool(
   {
     title: 'Record and verify an animation',
     description:
-      'Arms the native probe on views with the given testIDs, runs `trigger` (a shell command such as ' +
-      '`xcrun simctl openurl booted myapp://open-sheet` or `maestro test flow.yaml`), waits until motion settles and ' +
+      'Arms the native probe on views with the given testIDs, performs the interaction — `command` (a handler the app ' +
+      'registered with onMotionProbeCommand) or `trigger` (a shell command such as `maestro test flow.yaml`) — waits until motion settles and ' +
       'returns a compact report: per-property animations (from → to, duration, easing/spring fit), stalls, dropped frames, ' +
       'clipping and detected issues. With `spec`, also returns PASS/FAIL per expectation. ' +
       'Omit `trigger` only if you start the interaction within `timeoutMs` some other way; otherwise use motion_arm.',
     inputSchema: {
       targets: z.array(z.string()).optional().describe('testIDs to record. Defaults to the targets named in the spec.'),
+      command: z
+        .string()
+        .optional()
+        .describe('App command (onMotionProbeCommand handler) that performs the interaction after the probe is armed.'),
       trigger: z.string().optional().describe('Shell command that performs the interaction after the probe is armed.'),
       saveTracePath: z.string().optional().describe('Also write the raw trace JSON here.'),
       ...recordingInput,
@@ -132,6 +139,7 @@ server.registerTool(
       const { trace, session } = await recordMotion(client, {
         targets,
         trigger: args.trigger,
+        command: args.command,
         idleMs: args.idleMs,
         timeoutMs: args.timeoutMs,
         maxDurationMs: args.maxDurationMs,
@@ -156,7 +164,7 @@ server.registerTool(
   },
   (args) =>
     guard(async () => {
-      await client.waitForApp(15000);
+      await client.waitForApp(15000, args.app);
       const session = await client.arm({
         targets: args.targets,
         idleMs: args.idleMs,
@@ -166,6 +174,26 @@ server.registerTool(
         occlusionGrid: args.occlusionGrid,
       });
       return JSON.stringify({ sessionId: session.sessionId, found: session.found, missing: session.missing });
+    }),
+);
+
+server.registerTool(
+  'motion_send',
+  {
+    title: 'Run an app command',
+    description:
+      'Runs a handler the app registered with onMotionProbeCommand (e.g. "open-sheet") — a deterministic trigger that needs ' +
+      'no deep link (iOS confirms every simulator openurl) and no UI automation. Use it between motion_arm and motion_report.',
+    inputSchema: {
+      name: z.string().min(1).describe('Command name the app handles.'),
+      app: recordingInput.app,
+    },
+  },
+  (args) =>
+    guard(async () => {
+      await client.waitForApp(15000, args.app);
+      await client.command(args.name, args.app);
+      return `sent ${args.name}`;
     }),
 );
 

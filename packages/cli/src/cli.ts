@@ -22,9 +22,10 @@ const HELP = `motion-probe — verify React Native animations from what the UI l
 Usage:
   motion-probe serve            [--port 7357] [--host 127.0.0.1]
   motion-probe status
-  motion-probe record           -t <testID,...> [--trigger "<cmd>"] [--spec spec.json] [--format text|json|otlp]
+  motion-probe record           -t <testID,...> [--trigger "<cmd>" | --send <command>] [--spec spec.json] [--format text|json|otlp]
   motion-probe arm              -t <testID,...>   # prints a session id; trigger the interaction yourself
   motion-probe report           <sessionId> [--spec spec.json] [--format ...]
+  motion-probe send             <command>        # runs a handler the app registered with onMotionProbeCommand
   motion-probe analyze          <trace.json> [--spec spec.json] [--format ...]
   motion-probe baseline         <trace.json> [--out spec.json] [--tolerance 15]
   motion-probe spec-from-tokens <motions.json> [--tokens tokens.json,...] [--out spec.json] [--tolerance 10]
@@ -33,7 +34,9 @@ Usage:
 Options:
   -t, --targets         Comma-separated testIDs to record (defaults to the targets in --spec)
       --trigger         Shell command that performs the interaction after the probe is armed
-                        (e.g. "xcrun simctl openurl booted myapp://open-sheet" or "maestro test flow.yaml")
+                        (e.g. "maestro test flow.yaml", "adb shell input tap 540 1200" or a deep link)
+      --send            App command that performs the interaction instead: a handler the app registered with
+                        onMotionProbeCommand (no shell, no deep link, no UI automation)
   -s, --spec            Expectations file; exit code 1 when any expectation fails
   -f, --format          text (default, compact for agents) | json | otlp (OpenTelemetry traces)
       --idle            ms without change that ends a recording once motion started (default 300)
@@ -48,7 +51,8 @@ Options:
       --out             output file for \`baseline\` / \`spec-from-tokens\` (default stdout)
       --tolerance       relative timing tolerance in % (baseline 15, spec-from-tokens 10)
       --wait-app        ms to wait for an app to connect (default 15000)
-      --app             app connection id from \`status\` when several apps are connected (default: latest)
+      --app             app connection id from \`status\`, or a platform (ios | android), when several apps are
+                        connected (default: the latest)
   -p, --port            daemon port (default ${DEFAULT_PORT})
 
 Exit codes: 0 ok · 1 expectations failed · 2 error`;
@@ -56,6 +60,7 @@ Exit codes: 0 ok · 1 expectations failed · 2 error`;
 const OPTIONS = {
   targets: { type: 'string', short: 't' },
   trigger: { type: 'string' },
+  send: { type: 'string' },
   spec: { type: 'string', short: 's' },
   format: { type: 'string', short: 'f' },
   idle: { type: 'string' },
@@ -150,6 +155,15 @@ async function main(argv: string[]): Promise<number> {
       console.log(JSON.stringify(await client.status(), null, 2));
       return 0;
 
+    case 'send': {
+      const name = positionals[0];
+      if (!name) throw new CliError('usage: motion-probe send <command>');
+      await client.waitForApp(num(values['wait-app'], 15000, 'wait-app'), values.app);
+      await client.command(name, values.app);
+      console.error(`sent ${name}`);
+      return 0;
+    }
+
     case 'record': {
       const output = await emitOptions(values);
       const targets = await resolveTargets(values, output.spec);
@@ -158,6 +172,7 @@ async function main(argv: string[]): Promise<number> {
         const { trace } = await recordMotion(client, {
           targets,
           trigger: values.trigger,
+          command: values.send,
           waitAppMs: num(values['wait-app'], 15000, 'wait-app'),
           ...recordingOptions(values),
         });
@@ -169,7 +184,7 @@ async function main(argv: string[]): Promise<number> {
 
     case 'arm': {
       const targets = await resolveTargets(values);
-      await client.waitForApp(num(values['wait-app'], 15000, 'wait-app'));
+      await client.waitForApp(num(values['wait-app'], 15000, 'wait-app'), values.app);
       const session = await client.arm({ targets, ...recordingOptions(values) });
       console.log(JSON.stringify({ sessionId: session.sessionId, found: session.found, missing: session.missing }));
       return 0;
