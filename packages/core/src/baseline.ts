@@ -31,6 +31,8 @@ export function createBaselineSpec(report: MotionReport, options: BaselineOption
       if (s.kind === 'animation') {
         expectation.durationMs = timing(s.durationMs);
         expectation.maxStalls = s.stalls.length;
+        // A couple of dropped frames is noise; a regression that janks the animation is not.
+        expectation.maxDroppedFrames = Math.max(2, s.droppedFrames * 2);
         if (s.easing) {
           const named = s.easing.rmse <= 0.02;
           expectation.easing = named ? s.easing.name : s.easing.bezier;

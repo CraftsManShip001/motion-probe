@@ -63,32 +63,56 @@ export function detectIssues(report: Omit<MotionReport, 'issues'>): Issue[] {
       issues.push({ severity: 'info', code: 'invisible-at-end', target: t.id, message: `"${t.id}" ends fully transparent or hidden` });
       continue;
     }
+    if (t.final && t.final.width * t.final.height < 0.5) {
+      issues.push({ severity: 'info', code: 'invisible-at-end', target: t.id, message: `"${t.id}" ends with zero size (collapsed)` });
+      continue;
+    }
 
+    // Warnings are for views that come to rest *partly* visible: that is almost never intended. A view
+    // that ends entirely off screen was dismissed, and a view that did not move itself (a backdrop, a
+    // screen under a modal) is covered on purpose by whatever slid over it.
     const scrolled = t.segments.some((s) => s.prop === 'scrollX' || s.prop === 'scrollY');
+    const moved = t.segments.some((s) => s.prop !== 'opacity');
     if (v.finalClipRatio < 0.99) {
-      issues.push(
-        scrolled
-          ? {
-              severity: 'info',
-              code: 'scrolled-out-of-view',
-              target: t.id,
-              message: `"${t.id}" ends ${pct(v.finalClipRatio)} inside its scroll viewport after scrolling`,
-            }
-          : {
-              severity: 'warning',
-              code: 'clipped-at-end',
-              target: t.id,
-              message: `"${t.id}" ends only ${pct(v.finalClipRatio)} visible: cut off by an ancestor with overflow hidden, or off screen`,
-            },
-      );
+      if (scrolled) {
+        issues.push({
+          severity: 'info',
+          code: 'scrolled-out-of-view',
+          target: t.id,
+          message: `"${t.id}" ends ${pct(v.finalClipRatio)} inside its scroll viewport after scrolling`,
+        });
+      } else if (v.finalClipRatio <= 0.01) {
+        issues.push({
+          severity: 'info',
+          code: 'offscreen-at-end',
+          target: t.id,
+          message: `"${t.id}" ends entirely off screen or clipped away (dismissed?)`,
+        });
+      } else {
+        issues.push({
+          severity: 'warning',
+          code: 'clipped-at-end',
+          target: t.id,
+          message: `"${t.id}" ends only ${pct(v.finalClipRatio)} visible: cut off by an ancestor with overflow hidden, or off screen`,
+        });
+      }
     }
     if (v.finalOccludedRatio > 0.01) {
-      issues.push({
-        severity: 'warning',
-        code: 'occluded-at-end',
-        target: t.id,
-        message: `"${t.id}" ends ${pct(v.finalOccludedRatio)} covered by views drawn above it (overlay, or a sibling with a higher zIndex)`,
-      });
+      issues.push(
+        moved
+          ? {
+              severity: 'warning',
+              code: 'occluded-at-end',
+              target: t.id,
+              message: `"${t.id}" comes to rest ${pct(v.finalOccludedRatio)} covered by views drawn above it (overlay, or a sibling with a higher zIndex)`,
+            }
+          : {
+              severity: 'info',
+              code: 'covered-at-end',
+              target: t.id,
+              message: `"${t.id}" ends ${pct(v.finalOccludedRatio)} covered by views drawn above it; it did not move there itself (a backdrop under a sheet?)`,
+            },
+      );
     }
 
     const motion = t.motion;

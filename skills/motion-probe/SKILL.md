@@ -60,8 +60,12 @@ as the CLI commands below.
    - `JUMP`: the value changed within one frame (missing animation).
    - `⚠ froze Nms`: the value stopped updating mid-animation (JS thread blocked / JS-driven animation).
    - `⚠ dropped N frames`: the display itself skipped frames.
-   - `⚠ clipped`: part of the view was cut off by an ancestor with `overflow: hidden`, a scroll viewport or the screen.
-   - `⚠ covered`: another view painted above it (overlay, sibling with a higher zIndex) hides part of it.
+   - `clipped`: part of the view was cut off by an ancestor with `overflow: hidden`, a scroll viewport or the screen.
+     Marked `⚠` (issue `clipped-at-end`) only when the view comes to rest partly visible; sliding in
+     from off screen or being dismissed off screen is normal.
+   - `covered`: another view painted above it (overlay, sibling with a higher zIndex) hides part of it.
+     Marked `⚠` (issue `occluded-at-end`) only when the view moved itself into the covered spot; a
+     backdrop under a sheet is normal.
    - `visible min · final`: the share actually visible, counting both clipping and covering.
    - `left` / `top` segments: the view moved because its parent or layout moved, not its own transform or scrolling.
    - `scrollX` / `scrollY` segments: the enclosing scroll view scrolled (with its own easing fit).
