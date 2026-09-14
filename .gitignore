@@ -1,6 +1,7 @@
 node_modules/
 dist/
 packages/react-native/build/
+packages/react-native/android/build/
 *.tsbuildinfo
 .DS_Store
 

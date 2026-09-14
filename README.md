@@ -5,15 +5,12 @@
 화면 녹화를 프레임 이미지로 읽는 대신, 네이티브 뷰 레이어가 **실제로 렌더링하는 상태**(위치·transform·opacity·보이는 면적)를 매 디스플레이 프레임마다 기록합니다. 그 결과를 "무엇이 어디서 어디로, 몇 ms 동안, 어떤 곡선으로, 끊김·잘림 없이 움직였나"로 요약해서 텍스트 몇 줄 / JSON / OpenTelemetry로 돌려줍니다.
 
 ```
-$ npx motion-probe arm -t toast            # 프로브를 걸어 두고, 앱에서 토스트를 띄운다 (탭·딥링크·다른 MCP 무엇이든)
-{"sessionId":"28fe1f35","found":["toast"],"missing":[]}
+$ npx motion-probe record --spec examples/demo/specs/clipped-toast.spec.json --send run/clipped-toast
 
-$ npx motion-probe report 28fe1f35 --spec examples/demo/specs/clipped-toast.spec.json
-
-motion-probe · ios (iPhone 17 Pro) · 8236.1ms (settled) · 60fps · dropped 0
+motion-probe · ios (iPhone 17 Pro) · 682.4ms (settled) · 60fps · dropped 0
 ■ toast ⚠
-  translateY   60 → 30            @7536.1ms  266.7ms  ease-out (rmse 0.034) ≈ cubic-bezier(0,-0.285,0.355,1.005)
-  visible      min 0% · final 68% · ⚠ clipped 0–8236.1ms (min 0%)
+  translateY   60 → 30            @16.8ms  249ms  quad-out (rmse 0.001) ≈ cubic-bezier(0.15,0.3,0.525,1)
+  visible      min 8% · final 68% · ⚠ clipped 0–682.4ms (min 0%)
 issues: clipped-at-end(toast)
 
 FAIL 0/2 expectations
@@ -21,7 +18,7 @@ FAIL 0/2 expectations
   ✗ toast: "toast" ends 68% visible (expected ≥ 99%): 32% clipped
 ```
 
-<sub>iPhone 17 Pro 시뮬레이터(iOS 26.5)에서 데모 앱의 clipped-toast 시나리오를 실제로 기록한 출력입니다. `arm` 뒤 Run 버튼을 누르기까지 걸린 시간 때문에 애니메이션이 7.5초 지점(@7536ms)에서 시작합니다.</sub>
+<sub>iPhone 17 Pro 시뮬레이터(iOS 26.5)에서 데모 앱의 clipped-toast 시나리오를 실제로 기록한 출력입니다. Android 에뮬레이터(API 35)에서도 같은 결과(최종 68% 표시, 32% 잘림)가 나옵니다.</sub>
 
 > 값(`translateY 60 → 30`)만 보면 정상이지만, 부모의 `overflow: hidden` 때문에 토스트가 **32% 잘린 채로 끝난다**는 사실까지 드러납니다. JS 값 추적(Reanimated/Animated 훅)으로는 원리상 보이지 않는 버그입니다.
 
@@ -217,16 +214,20 @@ cd examples/demo && npx expo run:ios      # 또는 npx expo run:android
 
 데모 명령: `motion-probe send run/<timing|spring|native-driver|clipped-toast|js-jank|covered-badge|scroll|layout|all>`, `reset/<...>`. 같은 이름의 deep link(`motionprobe-demo://run/...`)도 동작하지만, iOS 시뮬레이터는 `simctl openurl`마다 확인창을 띄워 자동화에는 맞지 않습니다.
 
+iOS 빌드 주의: 프로젝트 경로에 공백이 있으면 Expo SDK 57의 iOS 빌드 스크립트(expo-constants 스크립트, 번들 단계)가 경로를 잘라 실패하니 공백 없는 경로에서 빌드하세요. 셸에 `LANG`이 비어 있으면 CocoaPods가 `Encoding::CompatibilityError`로 멈추므로 `LANG=en_US.UTF-8`을 지정합니다.
+
 ## 상태
 
 프로토타입(v0.1)입니다.
 
 - ✅ core 분석기 / 이슈 진단 / 스펙 판정 / 베이스라인 / 가림·스크롤 분석 / 디자인 토큰 → 스펙 / OTLP: 단위 테스트
-- ✅ CLI + 데몬 프로토콜: 가짜 앱 통합 테스트 (녹화, 트리거 실패 시 취소, 앱 끊김, 미연결 안내)
+- ✅ CLI + 데몬 프로토콜: 가짜 앱 통합 테스트 (녹화, 앱 명령, 트리거 실패 시 취소, 앱 끊김, 미연결 안내)
 - ✅ 앱 쪽 JS 레코더: 가짜 네이티브 모듈로 settle / timeout / 마운트 감지 / 취소 / 최대 길이 테스트
 - ✅ MCP 서버: SDK 클라이언트로 도구 목록·analyze·baseline·status 호출 확인
-- ✅ iOS 네이티브 프로브: Expo SDK 57 / RN 0.86 / Xcode 26 빌드 성공 (이후 수정분은 CI `ios-native` 잡으로 검증 예정)
-- ⚠️ 네이티브 가림·스크롤 측정, 시뮬레이터 실동작, Android 빌드·실행, 실제 에이전트 클라이언트(Claude Code 등) 연동: 아직 검증 전
+- ✅ iOS·Android 네이티브 컴파일: CI `ios-native` / `android-native` 잡 (Expo SDK 57 / RN 0.86)
+- ✅ 실동작: iPhone 17 Pro 시뮬레이터(iOS 26.5)와 Android 에뮬레이터(API 35)에서 데모 시나리오 8개를 `verify.sh`로 자동 검증 — 정상 시나리오 5개 PASS, 버그 시나리오 3개는 의도한 이유(잘림·JS 멈춤·가림)로 FAIL
+- ⚠️ 실물 기기, 실제 에이전트 클라이언트(Claude Code 등)에서의 MCP 연동: 아직 검증 전
+- ⚠️ 약 20회 실행 중 2회, 부하가 걸린 상황에서 js-jank의 값 멈춤을 놓친 적이 있습니다(재현되지 않음, `SAVE_DIR`로 원시 기록 수집 가능)
 
 한계와 로드맵은 [docs/DESIGN.md](docs/DESIGN.md#6-한계와-리스크)를 참고하세요.
 

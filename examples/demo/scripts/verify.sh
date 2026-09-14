@@ -7,7 +7,7 @@
 #
 # Prerequisites: demo app running (Android emulator: `adb reverse tcp:7357 tcp:7357`),
 # `npm run build` at the repo root. With both an iOS and an Android app connected, pick one with
-# PLATFORM=ios or PLATFORM=android.
+# PLATFORM=ios or PLATFORM=android. SAVE_DIR=<dir> keeps each raw trace (re-analyze with `analyze`).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -34,10 +34,12 @@ summary=""
 unexpected=0
 for scenario in "${SCENARIOS[@]}"; do
   echo "=== $scenario"
+  SAVE=()
+  [ -n "${SAVE_DIR:-}" ] && SAVE=(--save "$SAVE_DIR/$scenario.json")
   # $APP is intentionally unquoted: it is empty or a single --app=<platform> word.
   if "${CLI[@]}" send "reset/$scenario" $APP; then
     sleep 0.3 # let the reset render before arming
-    "${CLI[@]}" record $APP --spec "$SPECS/$scenario.spec.json" \
+    "${CLI[@]}" record $APP ${SAVE[@]+"${SAVE[@]}"} --spec "$SPECS/$scenario.spec.json" \
       --send "run/$scenario" \
       --timeout 8000 --idle 400
     code=$?
