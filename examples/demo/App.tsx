@@ -1,10 +1,9 @@
-import { installMotionProbe } from '@motion-probe/react-native';
+import { installMotionProbe, onMotionProbeCommand } from '@motion-probe/react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import {
   Animated as RNAnimated,
   Easing as RNEasing,
-  LayoutAnimation,
   Linking,
   Pressable,
   ScrollView,
@@ -12,7 +11,13 @@ import {
   Text,
   View,
 } from 'react-native';
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 
 if (__DEV__) installMotionProbe({ appName: 'motion-probe-demo', verbose: true });
 
@@ -169,18 +174,24 @@ function ScrollScenario({ command }: ScenarioProps) {
   );
 }
 
+// Width is a layout prop, so the panel is re-laid out on every frame (no transform involved).
+// In this app (RN 0.86 New Architecture + Reanimated 4), RN's LayoutAnimation did not animate on iOS and
+// Reanimated's LinearTransition was unreliable on Android when toggled — motion-probe reported JUMPs.
 function LayoutScenario({ command }: ScenarioProps) {
-  const [expanded, setExpanded] = useState(false);
+  const width = useSharedValue(80);
   useCommand(command, {
     run: () => {
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      setExpanded(true);
+      width.value = 80;
+      width.value = withTiming(300, { duration: 350 });
     },
-    reset: () => setExpanded(false),
+    reset: () => {
+      width.value = 80;
+    },
   });
+  const style = useAnimatedStyle(() => ({ width: width.value }));
   return (
     <View style={styles.stage}>
-      <View testID="layout-panel" style={[styles.panel, { width: expanded ? 300 : 80 }]} />
+      <Animated.View testID="layout-panel" style={[styles.panel, style]} />
     </View>
   );
 }
@@ -193,7 +204,7 @@ const SCENARIOS: Array<{ key: string; title: string; Component: (props: Scenario
   { key: 'js-jank', title: 'Bug · JS-driven + blocked JS thread', Component: JsJankScenario },
   { key: 'covered-badge', title: 'Bug · badge ends under a tooltip', Component: CoveredBadgeScenario },
   { key: 'scroll', title: 'ScrollView · scrollTo (animated)', Component: ScrollScenario },
-  { key: 'layout', title: 'LayoutAnimation · width', Component: LayoutScenario },
+  { key: 'layout', title: 'Reanimated · animated width (layout)', Component: LayoutScenario },
 ];
 
 export default function App() {
@@ -210,14 +221,21 @@ export default function App() {
   };
 
   useEffect(() => {
-    // motionprobe-demo://run/<scenario|all>, motionprobe-demo://reset/<scenario|all>
-    const handle = (url: string | null) => {
-      const match = url?.match(/:\/\/(run|reset)\/([\w-]+)/);
-      if (match) dispatch(match[2], match[1] as Action);
+    // `motion-probe send run/<scenario|all>` (or the deep link motionprobe-demo://run/<scenario|all>),
+    // same for reset/.
+    const handle = (command: string | null) => {
+      const match = command?.match(/(?:^|:\/\/)(run|reset)\/([\w-]+)$/);
+      if (!match || (match[2] !== 'all' && !SCENARIOS.some((s) => s.key === match[2]))) return false;
+      dispatch(match[2], match[1] as Action);
+      return true;
     };
     Linking.getInitialURL().then(handle);
     const subscription = Linking.addEventListener('url', (event) => handle(event.url));
-    return () => subscription.remove();
+    const unsubscribe = onMotionProbeCommand(handle);
+    return () => {
+      subscription.remove();
+      unsubscribe();
+    };
   }, []);
 
   return (
