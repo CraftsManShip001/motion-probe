@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 // Same zod instance as the MCP SDK (zod 3.25 ships the v4 API under `zod/v4`).
@@ -29,7 +30,7 @@ import {
 } from '@motion-probe/cli';
 import { readFile } from 'node:fs/promises';
 
-const VERSION = '0.1.0';
+const VERSION = (createRequire(import.meta.url)('../package.json') as { version: string }).version;
 const port = Number(process.env.MOTION_PROBE_PORT ?? DEFAULT_PORT);
 const host = process.env.MOTION_PROBE_HOST;
 const client = new DaemonClient(`http://127.0.0.1:${port}`);

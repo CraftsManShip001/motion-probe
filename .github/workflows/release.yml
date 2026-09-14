@@ -1,0 +1,45 @@
+name: Release
+
+# Push a tag like v0.1.1 (after scripts/set-version.mjs) to publish every @motion-probe package whose
+# version is not on npm yet. Publishing uses npm trusted publishing (OIDC), so no npm token is stored:
+# each package must list this repository and workflow as a trusted publisher on npmjs.com.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - name: npm with trusted publishing support
+        run: npm install -g npm@latest
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+      - name: Tag matches package versions
+        run: |
+          for p in core cli mcp react-native; do
+            v=$(node -p "require('./packages/$p/package.json').version")
+            if [ "v$v" != "$GITHUB_REF_NAME" ]; then echo "::error::@motion-probe/$p is $v, tag is $GITHUB_REF_NAME"; exit 1; fi
+          done
+      - name: Publish (dependencies first; skips versions already on npm)
+        run: |
+          for p in core cli mcp react-native; do
+            v=$(node -p "require('./packages/$p/package.json').version")
+            if npm view "@motion-probe/$p@$v" version >/dev/null 2>&1; then
+              echo "@motion-probe/$p@$v is already published"
+            else
+              npm publish -w "@motion-probe/$p" --provenance
+            fi
+          done
