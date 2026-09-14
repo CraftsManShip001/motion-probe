@@ -29,6 +29,31 @@ function devServerHost(): string | undefined {
 
 let uninstall: (() => void) | undefined;
 
+/** Return `false` for command names the handler does not know. */
+export type MotionProbeCommandHandler = (name: string) => void | boolean | Promise<void | boolean>;
+
+const commandHandlers = new Set<MotionProbeCommandHandler>();
+
+/**
+ * Registers a handler for `motion-probe send <name>`: a deterministic trigger for scripts and agents
+ * that needs no deep link (iOS asks for confirmation on every simulator `openurl`) and no UI
+ * automation. Returns an unsubscribe function.
+ */
+export function onMotionProbeCommand(handler: MotionProbeCommandHandler): () => void {
+  commandHandlers.add(handler);
+  return () => {
+    commandHandlers.delete(handler);
+  };
+}
+
+async function runCommand(name: string): Promise<boolean> {
+  let handled = false;
+  for (const handler of [...commandHandlers]) {
+    if ((await handler(name)) !== false) handled = true;
+  }
+  return handled;
+}
+
 /**
  * Connects the app to a local `motion-probe serve` daemon so the CLI (or an agent) can arm
  * recordings. Call once in development builds: `if (__DEV__) installMotionProbe()`.
@@ -62,6 +87,13 @@ export function installMotionProbe(options: InstallOptions = {}): () => void {
   };
 
   const handle = (message: DaemonToApp) => {
+    if (message.type === 'command') {
+      const { commandId, name } = message;
+      runCommand(name)
+        .then((handled) => send({ type: 'command-result', commandId, handled }))
+        .catch((error: unknown) => send({ type: 'command-result', commandId, handled: true, error: String(error) }));
+      return;
+    }
     if (message.type === 'cancel') {
       recordings.get(message.sessionId)?.cancel();
       return;

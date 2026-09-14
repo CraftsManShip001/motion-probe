@@ -3,6 +3,8 @@ import type { ArmRequest, SessionState } from './daemon.js';
 
 export interface SessionInfo {
   sessionId: string;
+  /** Connection id of the app that records this session. */
+  app?: string;
   state: SessionState;
   targets: string[];
   found: string[];
@@ -72,14 +74,21 @@ export class DaemonClient {
     return this.request<SessionInfo>('DELETE', `/sessions/${id}`);
   }
 
-  async waitForApp(timeoutMs: number): Promise<DaemonStatus['apps'][number]> {
+  /** Runs a handler the app registered with `onMotionProbeCommand`. */
+  command(name: string, app?: string) {
+    return this.request<{ name: string; app: string; handled: true }>('POST', '/commands', { name, app });
+  }
+
+  /** Waits for an app (by connection id or platform, default: the latest) to connect. */
+  async waitForApp(timeoutMs: number, selector?: string): Promise<DaemonStatus['apps'][number]> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const { apps } = await this.status();
-      if (apps.length) return apps[0];
+      const app = selector ? apps.find((a) => a.id === selector || a.platform === selector) : apps[0];
+      if (app) return app;
       if (Date.now() > deadline) {
         throw new CliError(
-          'no app connected. Is a development build running with installMotionProbe()? ' +
+          `no ${selector ? `"${selector}" ` : ''}app connected. Is a development build running with installMotionProbe()? ` +
             'Android: run `adb reverse tcp:7357 tcp:7357`. Physical device: `motion-probe serve --host 0.0.0.0`.',
         );
       }

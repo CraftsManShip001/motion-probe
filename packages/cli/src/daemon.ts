@@ -50,6 +50,18 @@ export interface ArmRequest {
   app?: string;
 }
 
+export interface CommandRequest {
+  name: string;
+  app?: string;
+}
+
+interface CommandResult {
+  handled: boolean;
+  error?: string;
+}
+
+const COMMAND_TIMEOUT_MS = 5000;
+
 export interface Daemon {
   port: number;
   close(): Promise<void>;
@@ -78,6 +90,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
   const log = options.log ?? ((message: string) => console.error(`[daemon] ${message}`));
   const apps = new Map<string, AppConnection>();
   const sessions = new Map<string, Session>();
+  const pendingCommands = new Map<string, (result: CommandResult) => void>();
 
   const notify = (session: Session) => {
     for (const listener of [...session.listeners]) listener();
@@ -103,6 +116,10 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
 
   const readyApps = () => [...apps.values()].filter((a) => a.info).sort((a, b) => b.connectedAt - a.connectedAt);
 
+  /** An app by connection id or platform ("ios" / "android"); the most recently connected one by default. */
+  const pickApp = (selector?: string) =>
+    selector ? (apps.get(selector) ?? readyApps().find((a) => a.info?.platform === selector)) : readyApps()[0];
+
   const describeSession = (s: Session) => ({
     sessionId: s.id,
     app: s.appId,
@@ -121,6 +138,10 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
       if (message.protocol !== PROTOCOL_VERSION) {
         log(`app ${app.id} speaks protocol ${message.protocol}, daemon speaks ${PROTOCOL_VERSION}`);
       }
+      return;
+    }
+    if (message.type === 'command-result') {
+      pendingCommands.get(message.commandId)?.(message);
       return;
     }
     const session = message.sessionId ? sessions.get(message.sessionId) : undefined;
@@ -156,12 +177,42 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
       });
     }
 
+    if (req.method === 'POST' && url.pathname === '/commands') {
+      const body = (await readJson(req)) as CommandRequest;
+      const name = body.name;
+      if (typeof name !== 'string' || !name) return json(res, 400, { error: 'name must be a non-empty string' });
+      const app = pickApp(body.app);
+      if (!app?.info) return json(res, 409, { error: 'no app connected' });
+
+      const commandId = randomUUID().slice(0, 8);
+      const result = await new Promise<CommandResult | undefined>((resolve) => {
+        const timer = setTimeout(() => {
+          pendingCommands.delete(commandId);
+          resolve(undefined);
+        }, COMMAND_TIMEOUT_MS);
+        pendingCommands.set(commandId, (r) => {
+          clearTimeout(timer);
+          pendingCommands.delete(commandId);
+          resolve(r);
+        });
+        send(app, { type: 'command', commandId, name });
+      });
+      if (!result) {
+        return json(res, 504, { error: `app did not answer "${name}" within 5s (is @motion-probe/react-native up to date?)` });
+      }
+      if (result.error) return json(res, 500, { error: `"${name}" failed in the app: ${result.error}` });
+      if (!result.handled) {
+        return json(res, 404, { error: `the app has no handler for "${name}" (register one with onMotionProbeCommand)` });
+      }
+      return json(res, 200, { name, app: app.id, handled: true });
+    }
+
     if (req.method === 'POST' && url.pathname === '/sessions') {
       const body = (await readJson(req)) as ArmRequest;
       if (!Array.isArray(body.targets) || body.targets.length === 0) {
         return json(res, 400, { error: 'targets must be a non-empty array of testIDs' });
       }
-      const app = body.app ? apps.get(body.app) : readyApps()[0];
+      const app = pickApp(body.app);
       if (!app?.info) return json(res, 409, { error: 'no app connected' });
 
       const session: Session = {

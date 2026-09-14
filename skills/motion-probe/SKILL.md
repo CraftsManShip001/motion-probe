@@ -11,8 +11,8 @@ duration, easing / spring fit, stalls, dropped frames, clipping). You never need
 frames.
 
 If the `motion-probe` MCP server is available, prefer its tools (`motion_record`, `motion_arm` +
-`motion_report`, `motion_baseline`, `motion_analyze`). They take the same parameters as the CLI
-commands below.
+`motion_report`, `motion_send`, `motion_baseline`, `motion_analyze`). They take the same parameters
+as the CLI commands below.
 
 ## Preconditions
 
@@ -24,22 +24,25 @@ commands below.
 
 ## Workflow
 
-1. **Put the app in the start state** (navigate there, or use the app's reset deep link).
+1. **Put the app in the start state** (navigate there, or run the app's reset command).
 2. **Record while triggering the interaction in one command.** The probe is armed before the
-   trigger runs and stops by itself once motion settles:
+   interaction runs and stops by itself once motion settles:
 
    ```sh
-   npx motion-probe record -t sheet,backdrop \
-     --trigger "xcrun simctl openurl booted myapp://open-sheet"
+   npx motion-probe record -t sheet,backdrop --send open-sheet
    ```
 
-   Any command can be the trigger: a deep link, `maestro test flow.yaml`, `adb shell input tap x y`.
+   `--send` runs a handler the app registered with `onMotionProbeCommand` — the most deterministic
+   trigger. Look for existing handlers in the app (search for `onMotionProbeCommand`); adding one for
+   the interaction under test is fine in development code. Otherwise any shell command can be the
+   trigger: `--trigger "maestro test flow.yaml"`, `--trigger "adb shell input tap x y"` or a deep link
+   (iOS simulators ask for confirmation on every `simctl openurl`, which blocks unattended runs).
    If you drive the UI with a separate tool (e.g. a Maestro or mobile MCP tap), split it:
 
    ```sh
    npx motion-probe serve &            # once (the MCP server hosts it for you)
    npx motion-probe arm -t sheet       # → {"sessionId":"ab12cd34",...}
-   # ... perform the tap with your other tool ...
+   # ... perform the tap with your other tool, or: npx motion-probe send open-sheet
    npx motion-probe report ab12cd34
    ```
 

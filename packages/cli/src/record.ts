@@ -7,6 +7,8 @@ export interface RecordRequest {
   targets: string[];
   /** Shell command that performs the interaction once the probe is armed. */
   trigger?: string;
+  /** App command (an `onMotionProbeCommand` handler) that performs the interaction once the probe is armed. */
+  command?: string;
   idleMs?: number;
   timeoutMs?: number;
   maxDurationMs?: number;
@@ -52,7 +54,7 @@ export async function recordMotion(
   const timeoutMs = request.timeoutMs ?? 5000;
   const maxDurationMs = request.maxDurationMs ?? 15000;
 
-  const latest = await client.waitForApp(request.waitAppMs ?? 15000);
+  const latest = await client.waitForApp(request.waitAppMs ?? 15000, request.app);
   const session = await client.arm({
     targets: request.targets,
     idleMs,
@@ -70,6 +72,15 @@ export async function recordMotion(
     if (code !== 0) {
       await client.cancel(session.sessionId).catch(() => {});
       throw new CliError(`trigger exited with code ${code}`);
+    }
+  }
+  if (request.command) {
+    log(`command: ${request.command}`);
+    try {
+      await client.command(request.command, session.app);
+    } catch (error) {
+      await client.cancel(session.sessionId).catch(() => {});
+      throw error;
     }
   }
   const trace = await client.waitForTrace(session.sessionId, timeoutMs + maxDurationMs + 5000);
