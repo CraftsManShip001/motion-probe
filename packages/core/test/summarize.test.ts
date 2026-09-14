@@ -45,6 +45,22 @@ describe('summarize', () => {
     expect(report.frames.droppedFrames).toBe(0);
   });
 
+  it('places the start between frames when the first moving frame shows ~0% progress', () => {
+    // Reanimated starts withTiming inside a frame callback, so its first rendered frame is barely
+    // past 0%. Taking the last still frame as the start would add a frame and skew the curve.
+    const start = 100 + 1000 / 60 - 1.5;
+    const trace = synthesize({
+      durationMs: 800,
+      targets: [{ id: 'card', at: (t) => ({ translateX: timing(t, start, 300, 0, 200, cubicOut) }) }],
+    });
+    const seg = summarize(trace).targets[0].segments[0];
+    expect(seg.startMs).toBeGreaterThan(110);
+    expect(seg.durationMs).toBeGreaterThan(298);
+    expect(seg.durationMs).toBeLessThan(304);
+    expect(seg.easing?.name).toBe('cubic-out');
+    expect(seg.easing!.rmse).toBeLessThan(0.01);
+  });
+
   it('recognizes springs: overshoot, crossings and damping ratio', () => {
     const trace = synthesize({
       durationMs: 2500,
