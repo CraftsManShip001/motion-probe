@@ -1,4 +1,4 @@
-import { fitEasing, type CurvePoint } from './easing.js';
+import { NAMED_EASINGS, fitEasing, rmse, type CurvePoint } from './easing.js';
 import { detectIssues } from './issues.js';
 import {
   DEFAULT_EPSILON,
@@ -175,6 +175,39 @@ function fitSpring(v: Float64Array, s0: number, e: number, to: number, delta: nu
   return fit;
 }
 
+/** Normalized progress of frames s0..e, with the motion starting at `t0` (≥ times[s0]). */
+function curvePoints(v: Float64Array, s0: number, e: number, times: number[], t0: number): CurvePoint[] {
+  const from = v[s0];
+  const delta = v[e] - from;
+  const duration = times[e] - t0;
+  const points: CurvePoint[] = [{ u: 0, p: 0 }];
+  for (let i = s0 + 1; i <= e; i++) points.push({ u: (times[i] - t0) / duration, p: (v[i] - from) / delta });
+  return points;
+}
+
+/**
+ * The last still frame only bounds the start from below. Drivers that start inside a frame callback
+ * (Reanimated) render ~0% progress on their first frame, so taking that still frame as the start adds
+ * a frame and makes the curve look slow to start. Picks the start between the still frame and the
+ * first moving frame whose curve best matches a named easing; ties keep the frame time.
+ */
+function estimateStart(v: Float64Array, s0: number, e: number, times: number[]): number {
+  const lo = times[s0];
+  const step = (times[s0 + 1] - lo) / 16;
+  let best = lo;
+  let bestErr = Infinity;
+  for (let k = 0; k < 16; k++) {
+    const points = curvePoints(v, s0, e, times, lo + k * step);
+    let err = Infinity;
+    for (const { fn } of Object.values(NAMED_EASINGS)) err = Math.min(err, rmse(points, fn));
+    if (err < bestErr - 1e-4) {
+      bestErr = err;
+      best = lo + k * step;
+    }
+  }
+  return best;
+}
+
 function buildSegment(
   prop: MotionProp,
   v: Float64Array,
@@ -261,15 +294,17 @@ function buildSegment(
   for (let i = s0 + 1; i <= e; i++) droppedFrames += missedFrames(times[i] - times[i - 1], nominal);
 
   const overshootPct = abs >= eps ? (overshoot / abs) * 100 : 0;
+  const fitsEasing = kind === 'animation' && abs >= eps && overshootPct < 2;
+  const t0 = fitsEasing ? estimateStart(v, s0, e, times) : startMs;
   const segment: Segment = {
     prop,
     kind,
     from: value(prop, from),
     to: value(prop, to),
-    startMs: ms(startMs),
+    startMs: ms(t0),
     endMs: ms(endMs),
-    durationMs: ms(endMs - startMs),
-    settleMs: ms(times[settleIndex] - startMs),
+    durationMs: ms(endMs - t0),
+    settleMs: ms(times[settleIndex] - t0),
     monotonic,
     overshootPct: round(overshootPct, 1),
     oscillations,
@@ -278,11 +313,9 @@ function buildSegment(
   };
 
   if (kind === 'animation' && abs >= eps) {
-    const duration = endMs - startMs;
-    const points: CurvePoint[] = [];
-    for (let i = s0; i <= e; i++) points.push({ u: (times[i] - startMs) / duration, p: (v[i] - from) / delta });
+    const points = curvePoints(v, s0, e, times, t0);
     segmentCurves.set(segment, points);
-    if (overshootPct < 2) {
+    if (fitsEasing) {
       const fit = fitEasing(points);
       segment.easing = {
         name: fit.name,
