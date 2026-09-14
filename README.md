@@ -188,8 +188,8 @@ npx motion-probe report ab12cd34 --format json
 | `JUMP` | 1프레임 안에 값이 바뀜 (애니메이션 누락) |
 | `⚠ froze 250ms` | 프레임은 나오는데 **값이 멈춤** (JS 스레드 막힘). 스프링 꼭짓점은 제외 |
 | `⚠ dropped N frames` | 디스플레이 프레임 자체가 빠짐 |
-| `⚠ clipped` | 조상 clip·스크롤 뷰포트·화면 경계에 잘림 |
-| `⚠ covered` | 위에 그려진 다른 뷰(오버레이, zIndex가 높은 형제)에 가려짐 |
+| `clipped` | 조상 clip·스크롤 뷰포트·화면 경계에 잘린 구간. **일부만 보인 채 끝났을 때만** `⚠`와 `clipped-at-end` (슬라이드 인 중 잘림, 화면 밖으로 닫힘은 정상) |
+| `covered` | 위에 그려진 다른 뷰(오버레이, zIndex가 높은 형제)에 가려진 구간. **스스로 움직여 가려진 자리에 멈췄을 때만** `⚠`와 `occluded-at-end` (시트 아래 backdrop은 정상) |
 | `visible min·final` | 잘림과 가림을 모두 반영한, 실제로 보이는 비율 |
 | `left` / `top` | 자기 transform이나 스크롤이 아니라 부모·레이아웃 때문에 이동 |
 | `scrollX` / `scrollY` | 감싸는 스크롤 뷰의 스크롤 (scrollTo 애니메이션 곡선까지) |

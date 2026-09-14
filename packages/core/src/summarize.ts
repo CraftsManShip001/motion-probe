@@ -397,6 +397,8 @@ function analyzeVisibility(
   const covered = s.cols.occludedRatio;
   const opacity = s.cols.effectiveOpacity;
   const effective = (f: number) => clipRatio[f] * (1 - covered[f]);
+  // A zero-size view (an accordion before it opens) has nothing to clip or cover.
+  const hasArea = (f: number) => s.cols.width[f] * s.cols.height[f] >= 0.5;
 
   let min = 1;
   const hidden: RatioInterval[] = [];
@@ -408,7 +410,7 @@ function analyzeVisibility(
     let openOccluded: OccludedInterval | null = null;
     for (let f = a; f <= b; f++) {
       const t = times[f];
-      const shown = opacity[f] > 0.01;
+      const shown = opacity[f] > 0.01 && hasArea(f);
       if (shown && (!motion || (t >= motion.startMs && t <= motion.endMs))) min = Math.min(min, effective(f));
       openHidden = trackMin(hidden, openHidden, shown && effective(f) < 0.99, t, effective(f));
       openClipped = trackMin(clipped, openClipped, shown && clipRatio[f] < 0.99, t, clipRatio[f]);

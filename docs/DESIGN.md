@@ -98,7 +98,7 @@ Maestro MCP 같은 도구에 런타임으로 의존하면 사용자층이 좁아
 
 ### 스펙 없이도 판정: 이슈 자동 진단
 스펙을 쓰는 사람이 없어도 에이전트가 바로 행동할 수 있어야 한다. 리포트에 `issues`를 붙여 흔한 결함을 코드로 분류한다.
-`target-not-found`, `jump`, `stall`, `dropped-frames`, `clipped-at-end`, `never-settled`는 warning 이상이고, `clipped-during-motion`(슬라이드 인/아웃에서 정상), `invisible-at-end`, `no-motion`은 info다.
+`target-not-found`, `jump`, `stall`, `dropped-frames`, `clipped-at-end`, `occluded-at-end`, `never-settled`는 warning 이상이고, `clipped-during-motion`(슬라이드 인/아웃에서 정상), `offscreen-at-end`, `covered-at-end`, `invisible-at-end`, `no-motion`은 info다. warning은 **일부만 보인 채 멈춘 상태**에만 준다. 화면 밖으로 완전히 나간 뷰는 닫힌 것(`offscreen-at-end`)이고, 스스로 움직이지 않았는데 가려진 뷰는 위로 올라온 무언가(시트 아래 backdrop)에 의도적으로 덮인 것(`covered-at-end`)이기 때문이다. 0.1.0을 새 앱에 설치해 써 본 결과, 이 두 경우를 warning으로 내면 에이전트가 정상 코드를 고치려 드는 오탐이 됐다.
 
 `stall`은 "값이 2프레임 이상 그대로이고, 아직 5% 이상 남았고, **멈추기 전후 진행 방향이 같다**"일 때만 잡는다. 스프링 꼭짓점처럼 속도가 0에 가까워지는 순간을 멈춤으로 오판하지 않기 위해서다.
 

@@ -223,8 +223,10 @@ export type IssueCode =
   | 'dropped-frames'
   | 'clipped-at-end'
   | 'clipped-during-motion'
+  | 'offscreen-at-end'
   | 'occluded-at-end'
   | 'occluded-during-motion'
+  | 'covered-at-end'
   | 'scrolled-out-of-view'
   | 'invisible-at-end';
 
