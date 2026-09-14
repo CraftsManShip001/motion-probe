@@ -1,0 +1,14 @@
+{
+  "schema": "motion-probe/spec@1",
+  "expectations": [
+    {
+      "target": "native-box",
+      "prop": "translateX",
+      "from": 0,
+      "to": 200,
+      "durationMs": 400,
+      "easing": "rn-ease-in-out",
+      "maxStalls": 0
+    }
+  ]
+}

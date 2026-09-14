@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+
+# Expo continuous native generation output
+examples/demo/ios/
+examples/demo/android/
+examples/demo/.expo/
+
+# motion-probe artifacts
+*.motion.json

@@ -1,0 +1,10 @@
+{
+  "$description": "Which views must follow which motion tokens. Generate a spec with: motion-probe spec-from-tokens motion/motions.json --tokens motion/tokens.json",
+  "motions": [
+    { "target": "timing-card", "prop": "translateX", "from": 0, "to": 200, "transition": "motion.transition.enter" },
+    { "target": "timing-card", "prop": "opacity", "from": 0.3, "to": 1, "duration": "motion.duration.short", "easing": "motion.easing.linear" },
+    { "target": "spring-badge", "prop": "scaleX", "from": 1, "to": 1.3, "spring": "motion.spring.playful" },
+    { "target": "toast", "prop": "translateY", "from": 60, "to": 8, "transition": "motion.transition.toast", "fullyVisibleAtEnd": true },
+    { "target": "covered-badge", "prop": "translateX", "from": 0, "to": 260, "duration": "motion.duration.medium", "easing": "motion.easing.decelerate", "fullyVisibleAtEnd": true }
+  ]
+}

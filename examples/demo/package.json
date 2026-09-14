@@ -1,0 +1,24 @@
+{
+  "name": "motion-probe-demo",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "dependencies": {
+    "@motion-probe/react-native": "0.1.0",
+    "expo": "~57.0.22",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-reanimated": "4.5.1",
+    "react-native-worklets": "0.10.1"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start --dev-client",
+    "ios": "expo run:ios",
+    "android": "expo run:android"
+  },
+  "private": true
+}

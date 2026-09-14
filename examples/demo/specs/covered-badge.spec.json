@@ -1,0 +1,7 @@
+{
+  "schema": "motion-probe/spec@1",
+  "expectations": [
+    { "target": "covered-badge", "prop": "translateX", "from": 0, "to": 260, "durationMs": 250, "easing": "cubic-out" },
+    { "target": "covered-badge", "minFinalVisibleRatio": 0.99, "maxFinalOccludedRatio": 0 }
+  ]
+}

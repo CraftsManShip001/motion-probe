@@ -1,0 +1,6 @@
+{
+  "schema": "motion-probe/spec@1",
+  "expectations": [
+    { "target": "jank-box", "prop": "translateX", "from": 0, "to": 200, "easing": "linear", "maxStalls": 0 }
+  ]
+}

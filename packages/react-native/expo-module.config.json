@@ -1,0 +1,10 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["MotionProbeModule"],
+    "debugOnly": true
+  },
+  "android": {
+    "modules": ["expo.modules.motionprobe.MotionProbeModule"]
+  }
+}

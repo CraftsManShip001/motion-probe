@@ -1,0 +1,480 @@
+import { fitEasing, type CurvePoint } from './easing.js';
+import { detectIssues } from './issues.js';
+import {
+  DEFAULT_EPSILON,
+  MOTION_PROPS,
+  REPORT_SCHEMA,
+  SAMPLE_COLUMNS,
+  type Bezier,
+  type FinalState,
+  type FrameStats,
+  type Interval,
+  type JankInterval,
+  type MotionProp,
+  type MotionReport,
+  type OccludedInterval,
+  type RatioInterval,
+  type RawTrace,
+  type Segment,
+  type SpringFit,
+  type Stall,
+  type TargetReport,
+  type Visibility,
+} from './schema.js';
+
+export interface SummarizeOptions {
+  /** Unchanged time that splits two segments of the same prop. */
+  gapMs?: number;
+  epsilon?: Partial<Record<MotionProp, number>>;
+}
+
+/** Normalized progress curve per segment, kept out of the JSON report but available to assertions. */
+export const segmentCurves = new WeakMap<Segment, CurvePoint[]>();
+
+const round = (v: number, digits: number) => {
+  const f = 10 ** digits;
+  return Math.round(v * f) / f;
+};
+const ms = (v: number) => round(v, 1);
+const ratio = (v: number) => round(v, 3);
+const value = (prop: MotionProp, v: number) =>
+  prop === 'opacity' || prop === 'scaleX' || prop === 'scaleY' ? round(v, 3) : round(v, 2);
+
+type Column = SampleColumn | 'left' | 'top';
+type SampleColumn = (typeof SAMPLE_COLUMNS)[number];
+
+interface TargetSeries {
+  present: Uint8Array;
+  cols: Record<Column, Float64Array>;
+}
+
+/** Expands change-only rows into per-frame, step-held series. */
+function reconstruct(trace: RawTrace): TargetSeries[] {
+  const n = trace.frameTimes.length;
+  const index = new Map(trace.columns.map((c, i) => [c, i]));
+  const frameCol = index.get('frame') ?? 0;
+  const targetCol = index.get('target') ?? 1;
+  const presentCol = index.get('present') ?? 2;
+
+  const rowsByTarget = trace.targets.map(() => [] as number[][]);
+  for (const row of trace.samples) rowsByTarget[row[targetCol]]?.push(row);
+
+  return rowsByTarget.map((rows) => {
+    rows.sort((a, b) => a[frameCol] - b[frameCol]);
+    const present = new Uint8Array(n);
+    const cols = {} as Record<Column, Float64Array>;
+    for (const c of [...SAMPLE_COLUMNS, 'left', 'top'] as Column[]) cols[c] = new Float64Array(n);
+
+    let current: number[] | undefined;
+    let k = 0;
+    for (let f = 0; f < n; f++) {
+      while (k < rows.length && rows[k][frameCol] <= f) current = rows[k++];
+      if (!current || current[presentCol] !== 1) continue;
+      present[f] = 1;
+      for (const c of SAMPLE_COLUMNS) {
+        const i = index.get(c);
+        if (i !== undefined) cols[c][f] = current[i] ?? 0;
+      }
+      // Layout position: window center minus own transform, plus scroll offset (content coordinates).
+      cols.left[f] = cols.x[f] + cols.width[f] / 2 - cols.translateX[f] - cols.boundsWidth[f] / 2 + cols.scrollX[f];
+      cols.top[f] = cols.y[f] + cols.height[f] / 2 - cols.translateY[f] - cols.boundsHeight[f] / 2 + cols.scrollY[f];
+    }
+    return { present, cols };
+  });
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+const missedFrames = (gapMs: number, nominal: number) =>
+  gapMs > nominal * 1.5 ? Math.max(1, Math.round(gapMs / nominal) - 1) : 0;
+
+export function frameStats(times: number[]): FrameStats {
+  const deltas: number[] = [];
+  for (let i = 1; i < times.length; i++) deltas.push(times[i] - times[i - 1]);
+  const nominal = deltas.length ? median(deltas) : 1000 / 60;
+
+  let dropped = 0;
+  let worst = 0;
+  const jank: JankInterval[] = [];
+  for (let i = 1; i < times.length; i++) {
+    const gap = times[i] - times[i - 1];
+    worst = Math.max(worst, gap);
+    const missed = missedFrames(gap, nominal);
+    if (!missed) continue;
+    dropped += missed;
+    const last = jank.at(-1);
+    if (last && last.endMs === times[i - 1]) {
+      last.endMs = times[i];
+      last.droppedFrames += missed;
+    } else {
+      jank.push({ startMs: times[i - 1], endMs: times[i], droppedFrames: missed });
+    }
+  }
+
+  return {
+    count: times.length,
+    nominalIntervalMs: round(nominal, 2),
+    fps: Math.round(1000 / nominal),
+    droppedFrames: dropped,
+    worstGapMs: ms(worst),
+    jank: jank.map((j) => ({ ...j, startMs: ms(j.startMs), endMs: ms(j.endMs) })),
+  };
+}
+
+function presenceRuns(present: Uint8Array): Array<[number, number]> {
+  const runs: Array<[number, number]> = [];
+  let start = -1;
+  for (let f = 0; f < present.length; f++) {
+    if (present[f] && start < 0) start = f;
+    if (!present[f] && start >= 0) {
+      runs.push([start, f - 1]);
+      start = -1;
+    }
+  }
+  if (start >= 0) runs.push([start, present.length - 1]);
+  return runs;
+}
+
+function fitSpring(v: Float64Array, s0: number, e: number, to: number, delta: number, times: number[]): SpringFit {
+  const abs = Math.abs(delta);
+  const band = abs * 0.005;
+  // Peak |deviation from `to`| per half-wave; the approach from `from` is the first half-wave.
+  const peaks: Array<{ amp: number; t: number }> = [];
+  let sign = 0;
+  for (let i = s0; i <= e; i++) {
+    const d = v[i] - to;
+    if (Math.abs(d) <= band) continue;
+    const sg = Math.sign(d);
+    if (sg !== sign) {
+      peaks.push({ amp: Math.abs(d), t: times[i] });
+      sign = sg;
+    } else if (Math.abs(d) > peaks[peaks.length - 1].amp) {
+      peaks[peaks.length - 1] = { amp: Math.abs(d), t: times[i] };
+    }
+  }
+  if (peaks.length < 2) return {};
+
+  const decrements: number[] = [];
+  for (let k = 0; k + 1 < peaks.length && decrements.length < 3; k++) {
+    if (peaks[k + 1].amp > band) decrements.push(Math.log(peaks[k].amp / peaks[k + 1].amp));
+  }
+  const fit: SpringFit = {};
+  if (decrements.length) {
+    const delta = decrements.reduce((a, b) => a + b, 0) / decrements.length;
+    fit.dampingRatio = round(delta / Math.sqrt(Math.PI * Math.PI + delta * delta), 3);
+  }
+  if (peaks.length >= 3) {
+    const halfPeriods: number[] = [];
+    for (let k = 1; k + 1 < peaks.length; k++) halfPeriods.push(peaks[k + 1].t - peaks[k].t);
+    fit.periodMs = ms((2 * halfPeriods.reduce((a, b) => a + b, 0)) / halfPeriods.length);
+  }
+  return fit;
+}
+
+function buildSegment(
+  prop: MotionProp,
+  v: Float64Array,
+  s0: number,
+  e: number,
+  times: number[],
+  nominal: number,
+  eps: number,
+): Segment | null {
+  const tiny = eps * 0.05;
+  const from = v[s0];
+  const to = v[e];
+  const delta = to - from;
+  const abs = Math.abs(delta);
+
+  let maxDeviation = 0;
+  for (let i = s0; i <= e; i++) maxDeviation = Math.max(maxDeviation, Math.abs(v[i] - from));
+  if (Math.max(abs, maxDeviation) < eps) return null;
+
+  const startMs = times[s0];
+  const endMs = times[e];
+  const kind = e - s0 <= 1 ? 'jump' : 'animation';
+
+  let overshoot = 0;
+  let oscillations = 0;
+  let monotonic = true;
+  let settleIndex = e;
+  if (abs >= eps) {
+    const dir = Math.sign(delta);
+    let sign = 0;
+    for (let i = s0; i <= e; i++) {
+      overshoot = Math.max(overshoot, (v[i] - to) * dir);
+      if (i > s0 && (v[i] - v[i - 1]) * dir < -Math.max(tiny, abs * 0.001)) monotonic = false;
+      const d = v[i] - to;
+      if (Math.abs(d) > abs * 0.005) {
+        const sg = Math.sign(d);
+        if (sign !== 0 && sg !== sign) oscillations++;
+        sign = sg;
+      }
+    }
+    const band = Math.max(abs * 0.02, eps * 0.5);
+    while (settleIndex > s0 && Math.abs(v[settleIndex - 1] - to) <= band) settleIndex--;
+  } else {
+    // Returns to where it started (pulse / shake): count direction reversals instead.
+    monotonic = false;
+    let dirSign = 0;
+    for (let i = s0 + 1; i <= e; i++) {
+      const step = v[i] - v[i - 1];
+      if (Math.abs(step) <= tiny) continue;
+      const sg = Math.sign(step);
+      if (dirSign !== 0 && sg !== dirSign) oscillations++;
+      dirSign = sg;
+    }
+  }
+
+  const stalls: Stall[] = [];
+  let heldFrom = -1;
+  for (let i = s0 + 1; i <= e; i++) {
+    const moving = Math.abs(v[i] - v[i - 1]) > tiny;
+    if (!moving) {
+      if (heldFrom < 0) heldFrom = i;
+      continue;
+    }
+    if (heldFrom >= 0) {
+      const held = i - heldFrom;
+      const remaining = abs >= eps ? Math.abs(to - v[i - 1]) / abs : 1;
+      // A freeze continues in the same direction afterwards; a spring turning point reverses.
+      const before = heldFrom - 2 >= s0 ? v[heldFrom - 1] - v[heldFrom - 2] : 0;
+      const after = v[i] - v[i - 1];
+      const sameDirection = Math.sign(before) === Math.sign(after);
+      if (held >= 2 && remaining > 0.05 && sameDirection) {
+        stalls.push({
+          startMs: ms(times[heldFrom - 1]),
+          endMs: ms(times[i]),
+          durationMs: ms(times[i] - times[heldFrom - 1]),
+          frames: held,
+        });
+      }
+      heldFrom = -1;
+    }
+  }
+
+  let droppedFrames = 0;
+  for (let i = s0 + 1; i <= e; i++) droppedFrames += missedFrames(times[i] - times[i - 1], nominal);
+
+  const overshootPct = abs >= eps ? (overshoot / abs) * 100 : 0;
+  const segment: Segment = {
+    prop,
+    kind,
+    from: value(prop, from),
+    to: value(prop, to),
+    startMs: ms(startMs),
+    endMs: ms(endMs),
+    durationMs: ms(endMs - startMs),
+    settleMs: ms(times[settleIndex] - startMs),
+    monotonic,
+    overshootPct: round(overshootPct, 1),
+    oscillations,
+    stalls,
+    droppedFrames,
+  };
+
+  if (kind === 'animation' && abs >= eps) {
+    const duration = endMs - startMs;
+    const points: CurvePoint[] = [];
+    for (let i = s0; i <= e; i++) points.push({ u: (times[i] - startMs) / duration, p: (v[i] - from) / delta });
+    segmentCurves.set(segment, points);
+    if (overshootPct < 2) {
+      const fit = fitEasing(points);
+      segment.easing = {
+        name: fit.name,
+        rmse: ratio(fit.rmse),
+        bezier: fit.bezier.map((b) => round(b, 3)) as unknown as Bezier,
+        bezierRmse: ratio(fit.bezierRmse),
+      };
+    } else {
+      segment.spring = fitSpring(v, s0, e, to, delta, times);
+    }
+  }
+  return segment;
+}
+
+function detectSegments(
+  prop: MotionProp,
+  v: Float64Array,
+  a: number,
+  b: number,
+  times: number[],
+  nominal: number,
+  gapMs: number,
+  eps: number,
+): Segment[] {
+  const tiny = eps * 0.05;
+  const out: Segment[] = [];
+  let first = -1;
+  let lastActive = -1;
+  const flush = () => {
+    if (first >= 0) {
+      // Include the easing tail: consecutive frames that still change, even by less than `tiny`.
+      let end = lastActive;
+      while (end < b && Math.abs(v[end + 1] - v[end]) > 1e-6) end++;
+      const segment = buildSegment(prop, v, first - 1, end, times, nominal, eps);
+      if (segment) out.push(segment);
+    }
+    first = -1;
+  };
+  for (let i = a + 1; i <= b; i++) {
+    if (Math.abs(v[i] - v[i - 1]) <= tiny) continue;
+    if (first >= 0 && times[i - 1] - times[lastActive] > gapMs) flush();
+    if (first < 0) first = i;
+    lastActive = i;
+  }
+  flush();
+  return out;
+}
+
+/** Extends the open interval while `active`, closing it into `list` otherwise. */
+function trackMin(list: RatioInterval[], open: RatioInterval | null, active: boolean, t: number, value: number) {
+  if (!active) {
+    if (open) list.push(open);
+    return null;
+  }
+  if (!open) return { startMs: t, endMs: t, minRatio: value };
+  open.endMs = t;
+  open.minRatio = Math.min(open.minRatio, value);
+  return open;
+}
+
+function trackMax(list: OccludedInterval[], open: OccludedInterval | null, active: boolean, t: number, value: number) {
+  if (!active) {
+    if (open) list.push(open);
+    return null;
+  }
+  if (!open) return { startMs: t, endMs: t, maxRatio: value };
+  open.endMs = t;
+  open.maxRatio = Math.max(open.maxRatio, value);
+  return open;
+}
+
+function analyzeVisibility(
+  s: TargetSeries,
+  runs: Array<[number, number]>,
+  times: number[],
+  motion: Interval | undefined,
+): Visibility {
+  const clipRatio = s.cols.visibleRatio;
+  const covered = s.cols.occludedRatio;
+  const opacity = s.cols.effectiveOpacity;
+  const effective = (f: number) => clipRatio[f] * (1 - covered[f]);
+
+  let min = 1;
+  const hidden: RatioInterval[] = [];
+  const clipped: RatioInterval[] = [];
+  const occluded: OccludedInterval[] = [];
+  for (const [a, b] of runs) {
+    let openHidden: RatioInterval | null = null;
+    let openClipped: RatioInterval | null = null;
+    let openOccluded: OccludedInterval | null = null;
+    for (let f = a; f <= b; f++) {
+      const t = times[f];
+      const shown = opacity[f] > 0.01;
+      if (shown && (!motion || (t >= motion.startMs && t <= motion.endMs))) min = Math.min(min, effective(f));
+      openHidden = trackMin(hidden, openHidden, shown && effective(f) < 0.99, t, effective(f));
+      openClipped = trackMin(clipped, openClipped, shown && clipRatio[f] < 0.99, t, clipRatio[f]);
+      openOccluded = trackMax(occluded, openOccluded, shown && covered[f] > 0.01, t, covered[f]);
+    }
+    if (openHidden) hidden.push(openHidden);
+    if (openClipped) clipped.push(openClipped);
+    if (openOccluded) occluded.push(openOccluded);
+  }
+
+  const last = runs[runs.length - 1][1];
+  const roundMin = (i: RatioInterval) => ({ startMs: ms(i.startMs), endMs: ms(i.endMs), minRatio: ratio(i.minRatio) });
+  return {
+    minRatio: ratio(min),
+    finalRatio: ratio(effective(last)),
+    finalClipRatio: ratio(clipRatio[last]),
+    finalOccludedRatio: ratio(covered[last]),
+    finalEffectiveOpacity: ratio(opacity[last]),
+    hidden: hidden.map(roundMin),
+    clipped: clipped.map(roundMin),
+    occluded: occluded.map((i) => ({ startMs: ms(i.startMs), endMs: ms(i.endMs), maxRatio: ratio(i.maxRatio) })),
+  };
+}
+
+function analyzeTarget(
+  id: string,
+  s: TargetSeries,
+  times: number[],
+  nominal: number,
+  gapMs: number,
+  eps: Record<MotionProp, number>,
+): TargetReport {
+  const runs = presenceRuns(s.present);
+  if (runs.length === 0) return { id, found: false, presence: [], segments: [] };
+
+  const segments: Segment[] = [];
+  for (const [a, b] of runs) {
+    for (const prop of MOTION_PROPS) {
+      segments.push(...detectSegments(prop, s.cols[prop], a, b, times, nominal, gapMs, eps[prop]));
+    }
+  }
+  segments.sort((x, y) => x.startMs - y.startMs || MOTION_PROPS.indexOf(x.prop) - MOTION_PROPS.indexOf(y.prop));
+
+  const motion = segments.length
+    ? {
+        startMs: Math.min(...segments.map((seg) => seg.startMs)),
+        endMs: Math.max(...segments.map((seg) => seg.endMs)),
+      }
+    : undefined;
+
+  const last = runs[runs.length - 1][1];
+  const c = s.cols;
+  const final: FinalState = {
+    x: round(c.x[last], 2),
+    y: round(c.y[last], 2),
+    width: round(c.width[last], 2),
+    height: round(c.height[last], 2),
+    translateX: round(c.translateX[last], 2),
+    translateY: round(c.translateY[last], 2),
+    scaleX: round(c.scaleX[last], 3),
+    scaleY: round(c.scaleY[last], 3),
+    rotation: round(c.rotation[last], 2),
+    opacity: round(c.opacity[last], 3),
+    effectiveOpacity: round(c.effectiveOpacity[last], 3),
+    visibleRatio: round(c.visibleRatio[last], 3),
+    occludedRatio: round(c.occludedRatio[last], 3),
+    scrollX: round(c.scrollX[last], 2),
+    scrollY: round(c.scrollY[last], 2),
+  };
+
+  return {
+    id,
+    found: true,
+    presence: runs.map(([a, b]) => ({ startMs: ms(times[a]), endMs: ms(times[b]) })),
+    motion,
+    segments,
+    visibility: analyzeVisibility(s, runs, times, motion),
+    final,
+  };
+}
+
+export function summarize(trace: RawTrace, options: SummarizeOptions = {}): MotionReport {
+  const times = trace.frameTimes;
+  const frames = frameStats(times);
+  const eps = { ...DEFAULT_EPSILON, ...options.epsilon };
+  const gapMs = options.gapMs ?? 300;
+  const series = reconstruct(trace);
+
+  const report = {
+    schema: REPORT_SCHEMA,
+    platform: trace.platform,
+    app: trace.app,
+    startedAt: trace.startedAt,
+    durationMs: ms(times.at(-1) ?? 0),
+    endReason: trace.endReason,
+    frames,
+    targets: trace.targets.map((id, i) =>
+      analyzeTarget(id, series[i], times, frames.nominalIntervalMs, gapMs, eps),
+    ),
+  };
+  return { ...report, issues: detectIssues(report) };
+}
