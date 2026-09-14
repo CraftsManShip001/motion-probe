@@ -6,17 +6,18 @@ The app side is [`@motion-probe/react-native`](https://www.npmjs.com/package/@mo
 
 ```sh
 # arm the probe, perform the interaction, wait until motion settles, check the spec
-npx motion-probe record -t toast --send show-toast --spec toast.spec.json
+npx motion-probe record --spec specs/clipped-toast.spec.json --send run/clipped-toast
 ```
 
 ```
-motion-probe · ios (iPhone 17 Pro) · 700ms (settled) · 60fps · dropped 0
+motion-probe · ios (iPhone 17 Pro) · 682.4ms (settled) · 60fps · dropped 0
 ■ toast ⚠
-  translateY   60 → 30            @16.7ms  266.7ms  ease-out (rmse 0.034)
-  visible      min 0% · final 68% · ⚠ clipped
+  translateY   60 → 30            @16.8ms  249ms  quad-out (rmse 0.001) ≈ cubic-bezier(0.15,0.3,0.525,1)
+  visible      min 8% · final 68% · ⚠ clipped 0–682.4ms (min 0%)
 issues: clipped-at-end(toast)
 
-FAIL 0/1 expectations
+FAIL 0/2 expectations
+  ✗ toast.translateY: translateY ended at 30, expected 8±2
   ✗ toast: "toast" ends 68% visible (expected ≥ 99%): 32% clipped
 ```
 
