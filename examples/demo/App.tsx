@@ -177,6 +177,7 @@ function ScrollScenario({ command }: ScenarioProps) {
 // Width is a layout prop, so the panel is re-laid out on every frame (no transform involved).
 // In this app (RN 0.86 New Architecture + Reanimated 4), RN's LayoutAnimation did not animate on iOS and
 // Reanimated's LinearTransition was unreliable on Android when toggled — motion-probe reported JUMPs.
+// (In a bare RN 0.85 app without Reanimated, LayoutAnimation animated on iOS but still jumped on Android.)
 function LayoutScenario({ command }: ScenarioProps) {
   const width = useSharedValue(80);
   useCommand(command, {
