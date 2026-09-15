@@ -79,8 +79,33 @@ function reconstruct(trace: RawTrace): TargetSeries[] {
       cols.left[f] = cols.x[f] + cols.width[f] / 2 - cols.translateX[f] - cols.boundsWidth[f] / 2 + cols.scrollX[f];
       cols.top[f] = cols.y[f] + cols.height[f] / 2 - cols.translateY[f] - cols.boundsHeight[f] / 2 + cols.scrollY[f];
     }
+    unwrapDegrees(cols.rotation, present);
     return { present, cols };
   });
+}
+
+/**
+ * Rotation arrives modulo a turn (iOS derives it with atan2 in (-180°, 180°]; a repeating animation
+ * resets Android's value from 360° to 0°). Unwrap it so a spinner reads as one continuous rotation
+ * instead of a jump every turn.
+ */
+function unwrapDegrees(v: Float64Array, present: Uint8Array) {
+  let offset = 0;
+  let prev: number | undefined;
+  for (let f = 0; f < v.length; f++) {
+    if (!present[f]) {
+      prev = undefined;
+      offset = 0;
+      continue;
+    }
+    const raw = v[f];
+    if (prev !== undefined) {
+      if (raw - prev > 180) offset -= 360;
+      else if (raw - prev < -180) offset += 360;
+    }
+    prev = raw;
+    v[f] = raw + offset;
+  }
 }
 
 function median(values: number[]): number {
@@ -171,6 +196,13 @@ function fitSpring(v: Float64Array, s0: number, e: number, to: number, delta: nu
     const halfPeriods: number[] = [];
     for (let k = 1; k + 1 < peaks.length; k++) halfPeriods.push(peaks[k + 1].t - peaks[k].t);
     fit.periodMs = ms((2 * halfPeriods.reduce((a, b) => a + b, 0)) / halfPeriods.length);
+  }
+  if (fit.dampingRatio !== undefined && fit.periodMs && fit.dampingRatio < 1) {
+    // Equivalent spring at mass 1, so the fit can be compared with a damping/stiffness config.
+    const zeta = fit.dampingRatio;
+    const omega = (2 * Math.PI) / (fit.periodMs / 1000) / Math.sqrt(1 - zeta * zeta);
+    fit.stiffness = Math.round(omega * omega);
+    fit.damping = round(2 * zeta * omega, 1);
   }
   return fit;
 }

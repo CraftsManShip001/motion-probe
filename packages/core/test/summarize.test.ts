@@ -73,8 +73,44 @@ describe('summarize', () => {
     expect(seg.spring?.dampingRatio).toBeGreaterThan(0.25);
     expect(seg.spring?.dampingRatio).toBeLessThan(0.35);
     expect(seg.settleMs).toBeGreaterThan(seg.spring!.periodMs!);
+    // ω = 20 rad/s, ζ = 0.3 → stiffness ω² = 400, damping 2ζω = 12 at mass 1.
+    expect(seg.spring!.stiffness).toBeGreaterThan(340);
+    expect(seg.spring!.stiffness).toBeLessThan(460);
+    expect(seg.spring!.damping).toBeGreaterThan(10);
+    expect(seg.spring!.damping).toBeLessThan(14);
+    expect(formatReport(summarize(trace))).toMatch(/≈ stiffness \d+ damping [\d.]+ @ mass 1/);
     // Turning points (velocity ≈ 0) must not be mistaken for freezes.
     expect(seg.stalls).toEqual([]);
+  });
+
+  it('reads a spinning view as one continuous rotation on both platforms', () => {
+    const turn = (t: number) => (t * 360) / 800; // one turn every 800ms
+    const trace = synthesize({
+      durationMs: 2000,
+      targets: [
+        // Android: a repeating animation resets the view's rotation from 360° to 0°.
+        { id: 'android', at: (t) => ({ rotation: turn(t) % 360 }) },
+        // iOS: rotation comes from atan2, in (-180°, 180°].
+        { id: 'ios', at: (t) => ({ rotation: ((turn(t) + 180) % 360) - 180 }) },
+      ],
+    });
+    const report = summarize(trace);
+    for (const target of report.targets) {
+      const segs = target.segments.filter((s) => s.prop === 'rotation');
+      expect(segs).toHaveLength(1);
+      expect(segs[0].kind).toBe('animation');
+      expect(segs[0].to - segs[0].from).toBeGreaterThan(850);
+      expect(segs[0].easing?.name).toBe('linear');
+    }
+    expect(report.issues.some((i) => i.code === 'jump')).toBe(false);
+  });
+
+  it('prints single-frame intervals as one frame', () => {
+    const trace = synthesize({
+      durationMs: 400,
+      targets: [{ id: 'title', at: (t) => ({ translateX: timing(t, 0, 200, 0, 50, linear), occludedRatio: t > 99 && t < 101 ? 1 : 0 }) }],
+    });
+    expect(formatReport(summarize(trace))).toMatch(/covered @100ms \(1 frame\)/);
   });
 
   it('detects a visual stall (value frozen mid-animation) even when the display did not drop frames', () => {
