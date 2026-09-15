@@ -16,6 +16,7 @@ import {
   type RatioInterval,
   type RawTrace,
   type Segment,
+  type SegmentLoop,
   type SpringFit,
   type Stall,
   type TargetReport,
@@ -326,7 +327,8 @@ function buildSegment(
   for (let i = s0 + 1; i <= e; i++) droppedFrames += missedFrames(times[i] - times[i - 1], nominal);
 
   const overshootPct = abs >= eps ? (overshoot / abs) * 100 : 0;
-  const fitsEasing = kind === 'animation' && abs >= eps && overshootPct < 2;
+  const loop = kind === 'animation' && oscillations >= 3 ? detectLoop(v, s0, e, times, prop) : undefined;
+  const fitsEasing = kind === 'animation' && abs >= eps && overshootPct < 2 && !loop;
   const t0 = fitsEasing ? estimateStart(v, s0, e, times) : startMs;
   const segment: Segment = {
     prop,
@@ -355,11 +357,47 @@ function buildSegment(
         bezier: fit.bezier.map((b) => round(b, 3)) as unknown as Bezier,
         bezierRmse: ratio(fit.bezierRmse),
       };
-    } else {
+    } else if (!loop) {
       segment.spring = fitSpring(v, s0, e, to, delta, times);
     }
   }
+  if (loop) segment.loop = loop;
   return segment;
+}
+
+/**
+ * A sustained oscillation (a pulse, a breathing or shimmer loop) swings between extremes that do not
+ * shrink. A spring oscillates too, but its swings decay quickly — fitting one to a loop yields
+ * nonsense such as a negative damping ratio.
+ */
+function detectLoop(v: Float64Array, s0: number, e: number, times: number[], prop: MotionProp): SegmentLoop | undefined {
+  const extrema: Array<{ v: number; t: number }> = [];
+  let dir = 0;
+  for (let i = s0 + 1; i <= e; i++) {
+    const step = v[i] - v[i - 1];
+    if (Math.abs(step) <= 1e-6) continue;
+    const sg = Math.sign(step);
+    if (dir !== 0 && sg !== dir) extrema.push({ v: v[i - 1], t: times[i - 1] });
+    dir = sg;
+  }
+  if (extrema.length < 3) return undefined;
+  const swings = extrema.slice(1).map((x, k) => Math.abs(x.v - extrema[k].v));
+  if (swings[swings.length - 1] < 0.7 * swings[0]) return undefined;
+
+  let min = Infinity;
+  let max = -Infinity;
+  for (let i = s0; i <= e; i++) {
+    min = Math.min(min, v[i]);
+    max = Math.max(max, v[i]);
+  }
+  const halfPeriods = extrema.slice(1).map((x, k) => x.t - extrema[k].t);
+  const periodMs = (2 * halfPeriods.reduce((a, b) => a + b, 0)) / halfPeriods.length;
+  return {
+    min: value(prop, min),
+    max: value(prop, max),
+    periodMs: ms(periodMs),
+    cycles: round((times[e] - times[s0]) / periodMs, 1),
+  };
 }
 
 function detectSegments(

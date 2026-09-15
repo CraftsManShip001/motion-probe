@@ -105,6 +105,26 @@ describe('summarize', () => {
     expect(report.issues.some((i) => i.code === 'jump')).toBe(false);
   });
 
+  it('reports a sustained pulse as a loop, not a spring', () => {
+    // Animated.loop: opacity 1 → 0.4 → 1 every 800ms; the recording ends mid-cycle.
+    const pulse = (t: number) => {
+      const u = ((t - 20) % 800) / 800;
+      return u < 0.5 ? 1 - 1.2 * u : 0.4 + 1.2 * (u - 0.5);
+    };
+    const trace = synthesize({
+      durationMs: 2500,
+      targets: [{ id: 'pulse', at: (t) => ({ opacity: t < 20 ? 1 : pulse(t) }) }],
+    });
+    const seg = summarize(trace).targets[0].segments[0];
+    expect(seg.loop?.min).toBeCloseTo(0.4, 1);
+    expect(seg.loop?.max).toBeCloseTo(1, 2);
+    expect(seg.loop?.periodMs).toBeGreaterThan(760);
+    expect(seg.loop?.periodMs).toBeLessThan(840);
+    expect(seg.spring).toBeUndefined();
+    expect(seg.easing).toBeUndefined();
+    expect(formatReport(summarize(trace))).toMatch(/loop 0\.4\d* ↔ 1 · period \d+(\.\d)?ms · 3(\.\d)? cycles/);
+  });
+
   it('prints single-frame intervals as one frame', () => {
     const trace = synthesize({
       durationMs: 400,

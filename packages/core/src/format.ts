@@ -7,6 +7,7 @@ const span = (i: { startMs: number; endMs: number }) =>
 
 function formatCurve(s: Segment): string {
   if (s.kind === 'jump') return 'JUMP (changed within 1 frame)';
+  if (s.loop) return `loop ${s.loop.min} ↔ ${s.loop.max} · period ${s.loop.periodMs}ms · ${s.loop.cycles} cycles`;
   if (s.spring) {
     const parts = [`spring overshoot ${s.overshootPct}%`, `crossings ${s.oscillations}`];
     if (s.spring.dampingRatio !== undefined) parts.push(`ζ≈${s.spring.dampingRatio}`);
