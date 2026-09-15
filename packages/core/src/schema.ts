@@ -232,7 +232,8 @@ export type IssueCode =
   | 'occluded-during-motion'
   | 'covered-at-end'
   | 'scrolled-out-of-view'
-  | 'invisible-at-end';
+  | 'invisible-at-end'
+  | 'unmounted';
 
 /** Problems detected without a spec, so an agent gets a verdict even when nobody wrote expectations. */
 export interface Issue {

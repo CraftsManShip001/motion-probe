@@ -1,7 +1,13 @@
-import type { Interval, Issue, MotionReport } from './schema.js';
+import type { Interval, Issue, MotionReport, TargetReport } from './schema.js';
 
 const pct = (r: number) => `${Math.round(r * 100)}%`;
 const overlaps = (a: Interval, b: Interval) => a.endMs >= b.startMs && a.startMs <= b.endMs;
+
+/** When the target left the screen before the recording ended (unmounted), else undefined. */
+export function unmountedAt(t: TargetReport, report: Pick<MotionReport, 'durationMs' | 'frames'>): number | undefined {
+  const last = t.presence.at(-1);
+  return last && last.endMs < report.durationMs - 2 * report.frames.nominalIntervalMs ? last.endMs : undefined;
+}
 
 export function detectIssues(report: Omit<MotionReport, 'issues'>): Issue[] {
   const issues: Issue[] = [];
@@ -59,6 +65,12 @@ export function detectIssues(report: Omit<MotionReport, 'issues'>): Issue[] {
 
     const v = t.visibility;
     if (!v) continue;
+    // A view that was removed (an exiting list item) has no end state to judge.
+    const gone = unmountedAt(t, report);
+    if (gone !== undefined) {
+      issues.push({ severity: 'info', code: 'unmounted', target: t.id, message: `"${t.id}" left the screen at ${gone}ms (unmounted)` });
+      continue;
+    }
     if (v.finalEffectiveOpacity <= 0.01) {
       issues.push({ severity: 'info', code: 'invisible-at-end', target: t.id, message: `"${t.id}" ends fully transparent or hidden` });
       continue;

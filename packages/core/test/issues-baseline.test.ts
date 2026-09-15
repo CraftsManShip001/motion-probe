@@ -80,6 +80,27 @@ describe('detectIssues', () => {
     expect(text).toMatch(/final transparent/);
   });
 
+  it('does not judge the end state of a view that was removed during the recording', () => {
+    const report = summarize(
+      synthesize({
+        durationMs: 800,
+        targets: [
+          {
+            id: 'leaving',
+            // An exiting list item: slides and fades out, is overlapped by the next item, then unmounts.
+            at: (t) =>
+              t > 300
+                ? null
+                : { translateX: timing(t, 0, 290, 0, -25, linear), opacity: timing(t, 0, 290, 1, 0.02, linear), visibleRatio: 0.98, occludedRatio: 0.5 },
+          },
+        ],
+      }),
+    );
+    expect(report.issues.map((i) => `${i.severity}:${i.code}`)).toEqual(['info:unmounted']);
+    expect(formatReport(report)).not.toMatch(/issues:/);
+    expect(createBaselineSpec(report).expectations.some((e) => e.minFinalVisibleRatio !== undefined)).toBe(false);
+  });
+
   it('does not count a zero-size view as clipped', () => {
     const report = summarize(
       synthesize({

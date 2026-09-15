@@ -1,4 +1,5 @@
 import { SPEC_SCHEMA, type Expectation, type MotionSpec } from './assert.js';
+import { unmountedAt } from './issues.js';
 import type { MotionReport } from './schema.js';
 
 export interface BaselineOptions {
@@ -47,7 +48,7 @@ export function createBaselineSpec(report: MotionReport, options: BaselineOption
     }
 
     const v = target.visibility;
-    if (v && v.finalEffectiveOpacity > 0.01) {
+    if (v && v.finalEffectiveOpacity > 0.01 && unmountedAt(target, report) === undefined) {
       expectations.push({ target: target.id, minFinalVisibleRatio: Math.max(0, Math.floor((v.finalRatio - 0.01) * 100) / 100) });
     }
   }

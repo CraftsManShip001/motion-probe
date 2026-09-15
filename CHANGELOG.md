@@ -22,6 +22,9 @@ transitions, a `withRepeat` spinner, springs, a percentage-width progress bar) o
   obvious: a Reanimated 4 `withSpring(…, { damping: 14, stiffness: 180 })` without `mass` measured
   `≈ stiffness 45 damping 3.5 @ mass 1`, i.e. it ran with mass 4.
 - Single-frame intervals print as `@t (1 frame)`.
+- **A view removed during the recording has no end state to judge.** An exiting list item that fades
+  out while the next item slides over it used to get `clipped-at-end` / `occluded-at-end` from its last
+  frame; it now reports the info `unmounted`, and baselines skip its final visibility.
 
 Known limitation: a fade inherited from an ancestor (a screen fading in) only shows in the final
 effective opacity, not as an `opacity` segment.
