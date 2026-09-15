@@ -220,6 +220,10 @@ final class MotionRecorder: NSObject {
     guard occlusionGrid > 0 else { return 0 }
     var covers: [CGRect] = []
     var budget = Self.occluderBudget
+    // Fabric can mount a view's children as later siblings (view flattening), so anything lying
+    // entirely inside the target is its own content, not something covering it.
+    let ownLayer = onScreen(view.layer)
+    let own = ownLayer.convert(ownLayer.bounds, to: windowLayer).insetBy(dx: -1, dy: -1)
     var child = view
     while let parent = child.superview {
       var paintedAfter = false
@@ -227,7 +231,7 @@ final class MotionRecorder: NSObject {
         if sibling === child {
           paintedAfter = true
         } else if paintedAfter {
-          collectCovers(sibling, target: visibleRect, windowLayer: windowLayer, onScreen: onScreen, covers: &covers, budget: &budget)
+          collectCovers(sibling, target: visibleRect, own: own, windowLayer: windowLayer, onScreen: onScreen, covers: &covers, budget: &budget)
         }
       }
       child = parent
@@ -251,6 +255,7 @@ final class MotionRecorder: NSObject {
   private func collectCovers(
     _ view: UIView,
     target: CGRect,
+    own: CGRect,
     windowLayer: CALayer,
     onScreen: (CALayer) -> CALayer,
     covers: inout [CGRect],
@@ -264,13 +269,13 @@ final class MotionRecorder: NSObject {
     let rect = layer.convert(layer.bounds, to: windowLayer)
     let intersects = rect.intersects(target)
     let clipsChildren = view.clipsToBounds || view.layer.masksToBounds
-    if intersects && layer.opacity >= 0.5 && paintsOpaqueContent(layer) {
+    if intersects && !own.contains(rect) && layer.opacity >= 0.5 && paintsOpaqueContent(layer) {
       covers.append(rect.intersection(target))
       if clipsChildren { return }
     }
     if clipsChildren && !intersects { return }
     for subview in view.subviews {
-      collectCovers(subview, target: target, windowLayer: windowLayer, onScreen: onScreen, covers: &covers, budget: &budget)
+      collectCovers(subview, target: target, own: own, windowLayer: windowLayer, onScreen: onScreen, covers: &covers, budget: &budget)
     }
   }
 
