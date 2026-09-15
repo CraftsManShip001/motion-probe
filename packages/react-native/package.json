@@ -1,6 +1,6 @@
 {
   "name": "@motion-probe/react-native",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Native UI-layer animation probe for React Native. Records what the view layer actually renders, frame by frame.",
   "license": "MIT",
   "main": "build/index.js",
@@ -30,7 +30,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@motion-probe/core": "0.1.1"
+    "@motion-probe/core": "0.1.2"
   },
   "peerDependencies": {
     "expo": "*",

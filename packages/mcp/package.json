@@ -1,6 +1,6 @@
 {
   "name": "@motion-probe/mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "MCP server for motion-probe: lets coding agents record and verify React Native animations.",
   "license": "MIT",
   "type": "module",
@@ -15,8 +15,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@motion-probe/cli": "0.1.1",
-    "@motion-probe/core": "0.1.1",
+    "@motion-probe/cli": "0.1.2",
+    "@motion-probe/core": "0.1.2",
     "zod": "^3.25.76"
   },
   "keywords": ["mcp", "react-native", "animation", "testing", "agent", "claude"],
