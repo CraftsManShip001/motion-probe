@@ -2,6 +2,8 @@ import type { AssertionReport } from './assert.js';
 import type { MotionReport, Segment, TargetReport } from './schema.js';
 
 const pct = (r: number) => `${Math.round(r * 100)}%`;
+const span = (i: { startMs: number; endMs: number }) =>
+  i.startMs === i.endMs ? `@${i.startMs}ms (1 frame)` : `${i.startMs}–${i.endMs}ms`;
 
 function formatCurve(s: Segment): string {
   if (s.kind === 'jump') return 'JUMP (changed within 1 frame)';
@@ -9,6 +11,7 @@ function formatCurve(s: Segment): string {
     const parts = [`spring overshoot ${s.overshootPct}%`, `crossings ${s.oscillations}`];
     if (s.spring.dampingRatio !== undefined) parts.push(`ζ≈${s.spring.dampingRatio}`);
     if (s.spring.periodMs !== undefined) parts.push(`period ${s.spring.periodMs}ms`);
+    if (s.spring.stiffness !== undefined) parts.push(`≈ stiffness ${s.spring.stiffness} damping ${s.spring.damping} @ mass 1`);
     parts.push(`settle ${s.settleMs}ms`);
     return parts.join(' · ');
   }
@@ -50,11 +53,11 @@ function formatTarget(t: TargetReport, report: MotionReport): string[] {
   if (!transparent && v.finalEffectiveOpacity < 0.99) visibility.push(`effective opacity ${v.finalEffectiveOpacity}`);
   if (v.clipped.length) {
     const mark = codes.has('clipped-at-end') ? '⚠ ' : '';
-    visibility.push(`${mark}clipped ${v.clipped.map((c) => `${c.startMs}–${c.endMs}ms (min ${pct(c.minRatio)})`).join(', ')}`);
+    visibility.push(`${mark}clipped ${v.clipped.map((c) => `${span(c)} (min ${pct(c.minRatio)})`).join(', ')}`);
   }
   if (v.occluded.length) {
     const mark = codes.has('occluded-at-end') ? '⚠ ' : '';
-    visibility.push(`${mark}covered ${v.occluded.map((o) => `${o.startMs}–${o.endMs}ms (max ${pct(o.maxRatio)})`).join(', ')}`);
+    visibility.push(`${mark}covered ${v.occluded.map((o) => `${span(o)} (max ${pct(o.maxRatio)})`).join(', ')}`);
   }
   lines.push(`  ${visibility.join(' · ')}`);
   return lines;

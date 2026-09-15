@@ -121,6 +121,10 @@ export interface EasingFit {
 export interface SpringFit {
   dampingRatio?: number;
   periodMs?: number;
+  /** Equivalent stiffness at mass 1 (from damping ratio and period). */
+  stiffness?: number;
+  /** Equivalent damping at mass 1. */
+  damping?: number;
 }
 
 export interface Segment {
