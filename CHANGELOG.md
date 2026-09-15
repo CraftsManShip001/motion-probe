@@ -15,6 +15,13 @@ away with react-native-gesture-handler + Reanimated, a press-and-hold scale, exp
   mixing the drag and the release; it now reads as a drag to ~280 and a 250ms release animation. A
   press-and-hold no longer merges the press and release animations into one "returns to start"
   segment when the hold is shorter than the 300ms gap. Spec expectations compare animations, not drags.
+  Verified with real touches on both platforms (adb swipe on Android, the iOS simulator's swipe and
+  long press): the drag distance matches the gesture, and the release reads 250ms `quad-in-out` for
+  `withTiming(…, { duration: 250 })`.
+- **Springs that do not overshoot are recognized.** Reanimated 4's default `withSpring` (stiffness
+  900, damping 120, mass 4) is critically damped, so it never overshoots and was reported as a poorly
+  fitting `cubic-out`. Critically and over-damped springs are now fitted too:
+  `spring overshoot 0% · ζ≈1 · ≈ stiffness 219 damping 29.6 @ mass 1` (exact: 225 / 30 at mass 1).
 
 - **Fades of an ancestor are reported.** A screen or card fading in (React Navigation's Android card
   transition fades the whole card) only showed up in `effective opacity`; it is now an
