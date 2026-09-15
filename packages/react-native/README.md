@@ -20,6 +20,11 @@ import { installMotionProbe } from '@motion-probe/react-native';
 if (__DEV__) installMotionProbe();
 ```
 
+Bare React Native apps need Expo Modules first (`npx install-expo-modules@latest`, then
+`npm install @motion-probe/react-native` and `pod install`). That requires an Expo SDK that supports
+the app's React Native version: Expo SDK 57 covers RN 0.86, so a brand-new RN 0.87 app fails with
+"Unable to find compatible Expo SDK version" until the next SDK.
+
 Rebuild the app once (native code; Expo Go is not supported). The app dials the local
 `motion-probe` daemon at `ws://<metro host>:7357/app`; on an Android emulator run
 `adb reverse tcp:7357 tcp:7357`.
