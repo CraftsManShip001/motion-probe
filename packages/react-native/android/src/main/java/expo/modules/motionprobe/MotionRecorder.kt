@@ -47,7 +47,7 @@ class MotionRecorder : Choreographer.FrameCallback {
   private var lastFrameNanos = 0L
   private var nominalFrameMs = 0.0
   private var maxDurationMs = 15000.0
-  private var resolveEveryFrames = 6
+  private var resolveEveryFrames = 1
   private var occlusionGrid = 6
   private var endReason = ""
   private var density = 1f
@@ -80,6 +80,8 @@ class MotionRecorder : Choreographer.FrameCallback {
 
     startNanos = System.nanoTime()
     running = true
+    // Sample once right away: the interaction may start before the next display frame.
+    sample(0.0)
     Choreographer.getInstance().postFrameCallback(this)
 
     return mapOf(
@@ -116,6 +118,18 @@ class MotionRecorder : Choreographer.FrameCallback {
     val t = max(0.0, (frameTimeNanos - startNanos) / 1e6)
     if (lastFrameNanos != 0L) nominalFrameMs = (frameTimeNanos - lastFrameNanos) / 1e6
     lastFrameNanos = frameTimeNanos
+    sample(t)
+
+    if (t >= maxDurationMs) {
+      endReason = "maxDuration"
+      stopFrames()
+      return
+    }
+    Choreographer.getInstance().postFrameCallback(this)
+  }
+
+  /** Records one frame: looks up targets that are not on screen and appends the rows that changed. */
+  private fun sample(t: Double) {
     val frame = frameIndex++
     frameTimes.add(t)
 
@@ -141,13 +155,6 @@ class MotionRecorder : Choreographer.FrameCallback {
         lastRows[i] = row
       }
     }
-
-    if (t >= maxDurationMs) {
-      endReason = "maxDuration"
-      stopFrames()
-      return
-    }
-    Choreographer.getInstance().postFrameCallback(this)
   }
 
   private fun measure(view: View, frame: Int, target: Int): DoubleArray {

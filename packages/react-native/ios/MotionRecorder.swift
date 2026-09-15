@@ -35,7 +35,7 @@ final class MotionRecorder: NSObject {
   private var frameIndex = 0
   private var t0: CFTimeInterval = 0
   private var maxDurationMs: Double = 15000
-  private var resolveEveryFrames = 6
+  private var resolveEveryFrames = 1
   private var occlusionGrid = 6
   private var nominalFrameMs: Double = 0
   private var endReason = ""
@@ -59,6 +59,8 @@ final class MotionRecorder: NSObject {
     for (i, id) in targets.enumerated() {
       resolved[i].view = findView(id, in: windows)
     }
+    // Sample once right away: the interaction may start before the next display frame.
+    sample(at: 0)
 
     let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
     if #available(iOS 15.0, *) {
@@ -103,6 +105,15 @@ final class MotionRecorder: NSObject {
   @objc private func tick(_ link: CADisplayLink) {
     let t = max(0, (link.timestamp - t0) * 1000)
     nominalFrameMs = (link.targetTimestamp - link.timestamp) * 1000
+    sample(at: t)
+    if t >= maxDurationMs {
+      endReason = "maxDuration"
+      invalidateLink()
+    }
+  }
+
+  /// Records one frame: looks up targets that are not on screen and appends the rows that changed.
+  private func sample(at t: Double) {
     let frame = frameIndex
     frameIndex += 1
     frameTimes.append(t)
@@ -112,7 +123,8 @@ final class MotionRecorder: NSObject {
       var view = resolved[i].view
       if view == nil || view?.window == nil || view?.accessibilityIdentifier != id {
         view = nil
-        // Re-resolve right after losing a view (remount / recycling), otherwise periodically.
+        // Look it up again right after losing it (remount / recycling), otherwise every
+        // `resolveEveryFrames` frames (default: every frame, so a mounting view is caught at once).
         let wasPresent = lastRows[i]?[2] == 1
         if wasPresent || frame % resolveEveryFrames == 0 {
           if windows == nil { windows = allWindows() }
@@ -137,11 +149,6 @@ final class MotionRecorder: NSObject {
         pendingSamples.append(row)
         lastRows[i] = row
       }
-    }
-
-    if t >= maxDurationMs {
-      endReason = "maxDuration"
-      invalidateLink()
     }
   }
 
