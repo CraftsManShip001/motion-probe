@@ -20,8 +20,12 @@ import {
   type SpringFit,
   type Stall,
   type TargetReport,
+  type TouchInterval,
   type Visibility,
 } from './schema.js';
+
+/** Finger travel (points / dp) that makes a touch a drag rather than a press. */
+const DRAG_SLOP = 10;
 
 export interface SummarizeOptions {
   /** Unchanged time that splits two segments of the same prop. */
@@ -38,10 +42,10 @@ const round = (v: number, digits: number) => {
 };
 const ms = (v: number) => round(v, 1);
 const ratio = (v: number) => round(v, 3);
-const value = (prop: MotionProp, v: number) =>
-  prop === 'opacity' || prop === 'scaleX' || prop === 'scaleY' ? round(v, 3) : round(v, 2);
+const RATIO_PROPS = new Set<MotionProp>(['opacity', 'inheritedOpacity', 'contentOpacity', 'scaleX', 'scaleY']);
+const value = (prop: MotionProp, v: number) => (RATIO_PROPS.has(prop) ? round(v, 3) : round(v, 2));
 
-type Column = SampleColumn | 'left' | 'top';
+type Column = SampleColumn | 'left' | 'top' | 'inheritedOpacity';
 type SampleColumn = (typeof SAMPLE_COLUMNS)[number];
 
 interface TargetSeries {
@@ -64,7 +68,7 @@ function reconstruct(trace: RawTrace): TargetSeries[] {
     rows.sort((a, b) => a[frameCol] - b[frameCol]);
     const present = new Uint8Array(n);
     const cols = {} as Record<Column, Float64Array>;
-    for (const c of [...SAMPLE_COLUMNS, 'left', 'top'] as Column[]) cols[c] = new Float64Array(n);
+    for (const c of [...SAMPLE_COLUMNS, 'left', 'top', 'inheritedOpacity'] as Column[]) cols[c] = new Float64Array(n);
 
     let current: number[] | undefined;
     let k = 0;
@@ -79,6 +83,11 @@ function reconstruct(trace: RawTrace): TargetSeries[] {
       // Layout position: window center minus own transform, plus scroll offset (content coordinates).
       cols.left[f] = cols.x[f] + cols.width[f] / 2 - cols.translateX[f] - cols.boundsWidth[f] / 2 + cols.scrollX[f];
       cols.top[f] = cols.y[f] + cols.height[f] / 2 - cols.translateY[f] - cols.boundsHeight[f] / 2 + cols.scrollY[f];
+      // Ancestors' share of the effective opacity; undefined while the view itself is transparent,
+      // so it holds the last known value.
+      const own = cols.opacity[f];
+      cols.inheritedOpacity[f] =
+        own > 0.001 ? Math.min(1, cols.effectiveOpacity[f] / own) : f > 0 && present[f - 1] ? cols.inheritedOpacity[f - 1] : 1;
     }
     unwrapDegrees(cols.rotation, present);
     return { present, cols };
@@ -165,6 +174,22 @@ function presenceRuns(present: Uint8Array): Array<[number, number]> {
   return runs;
 }
 
+/** Splits frame ranges at the first frame at or after each boundary time; pieces share that frame. */
+function splitAt(runs: Array<[number, number]>, boundaries: number[], times: number[]): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  for (const [a, b] of runs) {
+    let start = a;
+    for (const boundary of [...boundaries].sort((x, y) => x - y)) {
+      const k = times.findIndex((t, f) => f > start && f < b && t >= boundary && times[f - 1] < boundary);
+      if (k < 0) continue;
+      out.push([start, k]);
+      start = k;
+    }
+    out.push([start, b]);
+  }
+  return out;
+}
+
 function fitSpring(v: Float64Array, s0: number, e: number, to: number, delta: number, times: number[]): SpringFit {
   const abs = Math.abs(delta);
   const band = abs * 0.005;
@@ -208,6 +233,35 @@ function fitSpring(v: Float64Array, s0: number, e: number, to: number, delta: nu
   return fit;
 }
 
+/** Step response (0 → 1) of a spring with damping ratio ζ ≥ 1 and natural frequency ω (rad/s). */
+function dampedStep(zeta: number, omega: number, s: number): number {
+  if (zeta <= 1.0001) return 1 - (1 + omega * s) * Math.exp(-omega * s);
+  const root = Math.sqrt(zeta * zeta - 1);
+  const r1 = -omega * (zeta - root);
+  const r2 = -omega * (zeta + root);
+  return 1 - (r2 * Math.exp(r1 * s) - r1 * Math.exp(r2 * s)) / (r2 - r1);
+}
+
+/**
+ * Springs that do not overshoot (critically or over-damped, like Reanimated 4's default `withSpring`)
+ * look like an ease-out but approach the target asymptotically. Fits ζ ≥ 1 and ω to the progress curve.
+ */
+function fitDampedSpring(points: CurvePoint[], durationMs: number): { zeta: number; omega: number; rmse: number } {
+  let best = { zeta: 1, omega: 0, rmse: Infinity };
+  const errorOf = (zeta: number, omega: number) => {
+    let sum = 0;
+    for (const { u, p } of points) sum += (dampedStep(zeta, omega, (u * durationMs) / 1000) - p) ** 2;
+    return Math.sqrt(sum / points.length);
+  };
+  for (const zeta of [1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]) {
+    for (let omega = 2; omega <= 200; omega *= 1.04) {
+      const rmse = errorOf(zeta, omega);
+      if (rmse < best.rmse) best = { zeta, omega, rmse };
+    }
+  }
+  return best;
+}
+
 /** Normalized progress of frames s0..e, with the motion starting at `t0` (≥ times[s0]). */
 function curvePoints(v: Float64Array, s0: number, e: number, times: number[], t0: number): CurvePoint[] {
   const from = v[s0];
@@ -249,6 +303,7 @@ function buildSegment(
   times: number[],
   nominal: number,
   eps: number,
+  gesture: boolean,
 ): Segment | null {
   const tiny = eps * 0.05;
   const from = v[s0];
@@ -296,9 +351,10 @@ function buildSegment(
     }
   }
 
+  // A finger resting mid-drag holds the value; that is not the animation freezing.
   const stalls: Stall[] = [];
   let heldFrom = -1;
-  for (let i = s0 + 1; i <= e; i++) {
+  for (let i = s0 + 1; !gesture && i <= e; i++) {
     const moving = Math.abs(v[i] - v[i - 1]) > tiny;
     if (!moving) {
       if (heldFrom < 0) heldFrom = i;
@@ -327,8 +383,9 @@ function buildSegment(
   for (let i = s0 + 1; i <= e; i++) droppedFrames += missedFrames(times[i] - times[i - 1], nominal);
 
   const overshootPct = abs >= eps ? (overshoot / abs) * 100 : 0;
-  const loop = kind === 'animation' && oscillations >= 3 ? detectLoop(v, s0, e, times, prop) : undefined;
-  const fitsEasing = kind === 'animation' && abs >= eps && overshootPct < 2 && !loop;
+  const animated = kind === 'animation' && !gesture;
+  const loop = animated && oscillations >= 3 ? detectLoop(v, s0, e, times, prop) : undefined;
+  const fitsEasing = animated && abs >= eps && overshootPct < 2 && !loop;
   const t0 = fitsEasing ? estimateStart(v, s0, e, times) : startMs;
   const segment: Segment = {
     prop,
@@ -346,7 +403,8 @@ function buildSegment(
     droppedFrames,
   };
 
-  if (kind === 'animation' && abs >= eps) {
+  if (gesture) segment.gesture = true;
+  if (animated && abs >= eps) {
     const points = curvePoints(v, s0, e, times, t0);
     segmentCurves.set(segment, points);
     if (fitsEasing) {
@@ -357,6 +415,17 @@ function buildSegment(
         bezier: fit.bezier.map((b) => round(b, 3)) as unknown as Bezier,
         bezierRmse: ratio(fit.bezierRmse),
       };
+      // A poor easing fit on a curve that never overshoots may be a critically / over-damped spring.
+      if (fit.rmse > 0.02 && monotonic) {
+        const damped = fitDampedSpring(points, endMs - t0);
+        if (damped.rmse < 0.02 && damped.rmse < fit.rmse * 0.6) {
+          segment.spring = {
+            dampingRatio: round(damped.zeta, 2),
+            stiffness: Math.round(damped.omega ** 2),
+            damping: round(2 * damped.zeta * damped.omega, 1),
+          };
+        }
+      }
     } else if (!loop) {
       segment.spring = fitSpring(v, s0, e, to, delta, times);
     }
@@ -409,6 +478,7 @@ function detectSegments(
   nominal: number,
   gapMs: number,
   eps: number,
+  dragging: (startMs: number, endMs: number) => boolean,
 ): Segment[] {
   const tiny = eps * 0.05;
   const out: Segment[] = [];
@@ -419,7 +489,8 @@ function detectSegments(
       // Include the easing tail: consecutive frames that still change, even by less than `tiny`.
       let end = lastActive;
       while (end < b && Math.abs(v[end + 1] - v[end]) > 1e-6) end++;
-      const segment = buildSegment(prop, v, first - 1, end, times, nominal, eps);
+      const gesture = dragging(times[first - 1], times[end]);
+      const segment = buildSegment(prop, v, first - 1, end, times, nominal, eps, gesture);
       if (segment) out.push(segment);
     }
     first = -1;
@@ -512,14 +583,29 @@ function analyzeTarget(
   nominal: number,
   gapMs: number,
   eps: Record<MotionProp, number>,
+  touches: TouchInterval[],
 ): TargetReport {
   const runs = presenceRuns(s.present);
   if (runs.length === 0) return { id, found: false, presence: [], segments: [] };
 
+  // A finger going down or lifting starts something new (a press animation, a release or fling), so
+  // motion is split there; while a finger drags, the view follows it.
+  const drags = touches.filter((t) => t.distance >= DRAG_SLOP);
+  const dragging = (startMs: number, endMs: number) => {
+    const mid = (startMs + endMs) / 2;
+    return drags.some((t) => mid > t.startMs && mid < t.endMs);
+  };
+  const boundaries = touches.flatMap((t) => [t.startMs, t.endMs]);
+
   const segments: Segment[] = [];
-  for (const [a, b] of runs) {
+  for (const [a, b] of splitAt(runs, boundaries, times)) {
     for (const prop of MOTION_PROPS) {
-      segments.push(...detectSegments(prop, s.cols[prop], a, b, times, nominal, gapMs, eps[prop]));
+      for (const seg of detectSegments(prop, s.cols[prop], a, b, times, nominal, gapMs, eps[prop], dragging)) {
+        // A view's content is drawn on its first frames on screen (iOS renders text a frame after the
+        // view appears): that is the view mounting, not its content changing.
+        const atMount = prop === 'contentOpacity' && seg.kind === 'jump' && seg.startMs <= times[a] + 2.5 * nominal;
+        if (!atMount) segments.push(seg);
+      }
     }
   }
   segments.sort((x, y) => x.startMs - y.startMs || MOTION_PROPS.indexOf(x.prop) - MOTION_PROPS.indexOf(y.prop));
@@ -578,7 +664,7 @@ export function summarize(trace: RawTrace, options: SummarizeOptions = {}): Moti
     endReason: trace.endReason,
     frames,
     targets: trace.targets.map((id, i) =>
-      analyzeTarget(id, series[i], times, frames.nominalIntervalMs, gapMs, eps),
+      analyzeTarget(id, series[i], times, frames.nominalIntervalMs, gapMs, eps, trace.touches ?? []),
     ),
   };
   return { ...report, issues: detectIssues(report) };

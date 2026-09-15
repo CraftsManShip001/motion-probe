@@ -58,6 +58,9 @@ as the CLI commands below.
 
    - `issues:` lists problems found without any spec. Start there.
    - `JUMP`: the value changed within one frame (missing animation).
+   - `follows touch (drag)`: the view followed a dragging finger (no curve, no warnings). The motion after
+     the finger lifts (release / fling / snap back) is a separate segment with its own curve; judge that one.
+     Segments are also split where a finger goes down or lifts, so a press and its release are separate.
    - `⚠ froze Nms`: the value stopped updating mid-animation (JS thread blocked / JS-driven animation).
    - `⚠ dropped N frames`: the display itself skipped frames.
    - `clipped`: part of the view was cut off by an ancestor with `overflow: hidden`, a scroll viewport or the screen.
@@ -69,6 +72,9 @@ as the CLI commands below.
    - `visible min · final`: the share actually visible, counting both clipping and covering.
    - `left` / `top` segments: the view moved because its parent or layout moved, not its own transform or scrolling.
    - `scrollX` / `scrollY` segments: the enclosing scroll view scrolled (with its own easing fit).
+   - `inheritedOpacity` segments: an ancestor faded (a screen or card fading in); the view's own fade is `opacity`.
+   - `contentOpacity` segments: what the view draws inside itself faded (an image fading in: expo-image
+     `transition`, iOS cross-dissolve). A content JUMP (an image popping in without a transition) is info only.
 
 4. **Assert when there is a spec.** Write expectations and re-run with `--spec`; exit code 1 means
    at least one expectation failed and the output says why:
@@ -86,7 +92,7 @@ as the CLI commands below.
    Available checks: `from`, `to`, `tolerance`, `startMs`, `durationMs`, `settleMs`,
    `maxOvershootPct`, `minOvershootPct`, `monotonic`, `easing` (name or `[x1,y1,x2,y2]`),
    `maxEasingRmse`, `maxStalls`, `maxDroppedFrames`, `minVisibleRatio`, `minFinalVisibleRatio`,
-   `maxFinalOccludedRatio`, `shouldMove`, `mustBeFound`. Props also include `scrollX` / `scrollY`. Timing values accept a number (default tolerance), `{ "value": 300, "tolerance": 20 }`
+   `maxFinalOccludedRatio`, `shouldMove`, `mustBeFound`. Props also include `scrollX` / `scrollY`, `inheritedOpacity` and `contentOpacity`. Timing values accept a number (default tolerance), `{ "value": 300, "tolerance": 20 }`
    or `{ "min": 200, "max": 400 }`. List easing names with `npx motion-probe easings`.
 
 5. **Fix and repeat** until the spec passes and `issues:` is empty (or only expected ones remain).

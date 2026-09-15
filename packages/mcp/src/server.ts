@@ -58,7 +58,8 @@ async function guard(run: () => Promise<string>) {
 const expectationSchema = z
   .looseObject({ target: z.string() })
   .describe(
-    'One expectation. Checks: prop (translateX|translateY|scaleX|scaleY|rotation|opacity|boundsWidth|boundsHeight|left|top), ' +
+    'One expectation. Checks: prop (translateX|translateY|scaleX|scaleY|rotation|opacity|inheritedOpacity|contentOpacity|' +
+      'boundsWidth|boundsHeight|left|top|scrollX|scrollY), ' +
       'from, to, tolerance, startMs, durationMs, settleMs (number | {value,tolerance} | {min,max}), maxOvershootPct, monotonic, ' +
       'easing (name or [x1,y1,x2,y2]), maxEasingRmse, maxStalls, maxDroppedFrames, minVisibleRatio, minFinalVisibleRatio, shouldMove, mustBeFound.',
   );

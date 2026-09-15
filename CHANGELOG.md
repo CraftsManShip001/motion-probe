@@ -2,6 +2,37 @@
 
 All `@motion-probe/*` packages share one version.
 
+## 0.1.4
+
+Found with a fourth fresh app (Expo SDK 57 / RN 0.86: React Navigation's JS stack, a card swiped
+away with react-native-gesture-handler + Reanimated, a press-and-hold scale, expo-image with a
+`transition`) on iOS and Android, with real touches on Android.
+
+- **Touch-aware segments.** The probe now records when fingers are down (`touches` in the raw trace)
+  and the analyzer splits motion where a finger goes down or lifts. Motion while a finger drags is
+  marked `follows touch (drag)` (no curve fitted, no jump/stall warnings), and what happens after the
+  finger lifts is its own segment with its own curve: a swiped card read as one 0 → 500 "ease-out"
+  mixing the drag and the release; it now reads as a drag to ~280 and a 250ms release animation. A
+  press-and-hold no longer merges the press and release animations into one "returns to start"
+  segment when the hold is shorter than the 300ms gap. Spec expectations compare animations, not drags.
+
+- **Fades of an ancestor are reported.** A screen or card fading in (React Navigation's Android card
+  transition fades the whole card) only showed up in `effective opacity`; it is now an
+  `inheritedOpacity` segment with its own curve, separate from the view's own `opacity`.
+- **Fades inside a view are reported.** Image libraries fade the image, not the view you tag: expo-image
+  animates a child ImageView's alpha on Android and runs a cross-dissolve transition on iOS, so an image
+  with `transition={300}` read `(no motion)`. The new `contentOpacity` column records what a view draws
+  inside itself (images, text and backgrounds of its descendants, blended through cross-dissolves), so
+  the fade reads `contentOpacity 0 → 1 … 300ms`. A content JUMP (an image appearing without a
+  transition) is info, not a warning.
+- **No phantom jump when a recycled view mounts (iOS).** Fabric reuses native views; a reused view kept
+  its previous frame in the presentation layer until it was first rendered, so a freshly mounted view
+  was reported as `JUMP` from its old size and position (e.g. from a full-screen container to 96×96).
+- **Transparent React Native backgrounds no longer count as opaque (Android).** RN keeps a view's
+  background, borders and radii in one layer drawable that reports full alpha even without a background
+  color, so a view with only a `borderRadius` counted as painted content (and as a cover for occlusion).
+  The background color is now read from React Native itself.
+
 ## 0.1.3
 
 Found with a third fresh app: a bare React Native app (no Expo template, no Reanimated) using

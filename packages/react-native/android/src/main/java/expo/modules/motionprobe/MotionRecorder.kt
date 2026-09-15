@@ -1,13 +1,18 @@
 package expo.modules.motionprobe
 
 import android.app.Activity
+import android.graphics.Color
 import android.graphics.RectF
+import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.view.Choreographer
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.Window
 import android.widget.ImageView
 import com.facebook.react.R
+import com.facebook.react.uimanager.BackgroundStyleApplicator
 import com.facebook.react.uimanager.ReactOverflowView
 import java.lang.ref.WeakReference
 import kotlin.math.abs
@@ -27,11 +32,14 @@ class MotionRecorder : Choreographer.FrameCallback {
       "boundsWidth", "boundsHeight",
       "translateX", "translateY", "scaleX", "scaleY", "rotation",
       "opacity", "effectiveOpacity", "visibleRatio",
-      "occludedRatio", "scrollX", "scrollY",
+      "occludedRatio", "scrollX", "scrollY", "contentOpacity",
     )
 
     /** Upper bound of views inspected per target per frame when looking for occluders. */
     private const val OCCLUDER_BUDGET = 400
+
+    /** Upper bound of descendants inspected per target per frame for content opacity. */
+    private const val CONTENT_BUDGET = 200
   }
 
   private var activity = WeakReference<Activity>(null)
@@ -51,6 +59,11 @@ class MotionRecorder : Choreographer.FrameCallback {
   private var occlusionGrid = 6
   private var endReason = ""
   private var density = 1f
+
+  /** Touch sequences as [startMs, endMs (-1 while down), farthest distance from touch-down in dp]. */
+  private val touches = ArrayList<DoubleArray>()
+  private val touchOrigins = HashMap<Int, Pair<Float, Float>>()
+  private var touchWindow: Window? = null
 
   fun start(
     activity: Activity?,
@@ -74,6 +87,13 @@ class MotionRecorder : Choreographer.FrameCallback {
     frameIndex = 0
     lastFrameNanos = 0L
     endReason = ""
+    touches.clear()
+    touchOrigins.clear()
+    activity?.window?.let { window ->
+      val callback = window.callback ?: return@let
+      window.callback = TouchObserver(callback, ::onTouch)
+      touchWindow = window
+    }
 
     val root = activity?.window?.decorView
     targets.forEachIndexed { i, id -> views[i] = WeakReference<View>(root?.let { findView(it, id) }) }
@@ -104,6 +124,7 @@ class MotionRecorder : Choreographer.FrameCallback {
       "running" to running,
       "endReason" to endReason,
       "nominalFrameMs" to nominalFrameMs,
+      "touches" to touches.map { it.toList() },
     )
   }
 
@@ -194,8 +215,53 @@ class MotionRecorder : Choreographer.FrameCallback {
       view.width / d, view.height / d,
       view.translationX / d, view.translationY / d, view.scaleX.toDouble(), view.scaleY.toDouble(), view.rotation.toDouble(),
       view.alpha.toDouble(), effectiveOpacity, min(1.0, visibleRatio),
-      occluded, scrollX / d, scrollY / d,
+      occluded, scrollX / d, scrollY / d, contentOpacity(view, RectF(rect).apply { inset(-1f, -1f) }, rootView),
     )
+  }
+
+  // Content
+
+  /**
+   * Opacity of what the view draws inside itself, relative to the view: its own image and its
+   * descendants' images, text and backgrounds, composited as overlapping layers (1 − Π(1 − alpha)).
+   * The view's own background is not content, so an image fading in over a placeholder color counts.
+   * Image libraries fade images in by animating a child ImageView's alpha (expo-image, Glide targets).
+   */
+  private fun contentOpacity(view: View, own: RectF, rootView: View): Double {
+    val budget = intArrayOf(CONTENT_BUDGET)
+    var clear = 1.0
+    fun visit(v: View, inherited: Double, isTarget: Boolean) {
+      if (budget[0] <= 0 || clear <= 0.001 || v.visibility != View.VISIBLE) return
+      budget[0]--
+      val alpha = if (isTarget) 1.0 else inherited * v.alpha
+      if (alpha < 0.001) return
+      if (drawsContent(v, withBackground = !isTarget)) clear *= 1 - alpha
+      if (v is ViewGroup) for (i in 0 until v.childCount) visit(v.getChildAt(i), alpha, false)
+    }
+    visit(view, 1.0, true)
+    // Fabric mounts the children of a view that does not form a stacking context as later siblings of
+    // it (view flattening): what lies inside the view and draws after it is its content too.
+    val parent = view.parent as? ViewGroup
+    if (parent != null) {
+      val positions = drawingPositions(parent)
+      val index = parent.indexOfChild(view)
+      for (i in 0 until parent.childCount) {
+        val sibling = parent.getChildAt(i)
+        val paintedAfter = sibling.z > view.z || (sibling.z == view.z && positions[i] > positions[index])
+        if (i != index && paintedAfter && own.contains(boundsInRoot(sibling, rootView))) visit(sibling, 1.0, false)
+      }
+    }
+    return 1 - clear
+  }
+
+  /** Backgrounds, loaded images, and leaf views that draw themselves (text, custom drawing). */
+  private fun drawsContent(view: View, withBackground: Boolean): Boolean {
+    if (withBackground && paintsOpaqueContent(view)) return true
+    return when (view) {
+      is ImageView -> view.drawable != null
+      is ViewGroup -> false
+      else -> view.width > 0 && view.height > 0
+    }
   }
 
   // Occlusion
@@ -272,7 +338,17 @@ class MotionRecorder : Choreographer.FrameCallback {
 
   private fun paintsOpaqueContent(view: View): Boolean {
     val background = view.background
-    if (background != null && background.alpha >= 128) return true
+    if (background != null && background.alpha >= 128) {
+      val opaque = when {
+        // RN keeps backgrounds, borders and radii in one layer drawable whose alpha is 255 even
+        // without a background color (a view with only a borderRadius paints nothing).
+        background.javaClass.name.endsWith(".CompositeBackgroundDrawable") ->
+          BackgroundStyleApplicator.getBackgroundColor(view)?.let { Color.alpha(it) >= 128 } ?: false
+        background is ColorDrawable -> Color.alpha(background.color) >= 128
+        else -> true
+      }
+      if (opaque) return true
+    }
     return view is ImageView && view.drawable != null
   }
 
@@ -361,5 +437,45 @@ class MotionRecorder : Choreographer.FrameCallback {
   private fun stopFrames() {
     if (running) Choreographer.getInstance().removeFrameCallback(this)
     running = false
+    // Restore the window callback unless something wrapped it after us (ours then just forwards).
+    touchWindow?.let { window ->
+      (window.callback as? TouchObserver)?.let { window.callback = it.delegate }
+    }
+    touchWindow = null
+  }
+
+  // Touches
+
+  /** Notes when fingers are down and how far they moved; times share the Choreographer's clock. */
+  private fun onTouch(event: MotionEvent) {
+    if (!running) return
+    val t = max(0.0, (event.eventTime * 1_000_000L - startNanos) / 1e6)
+    when (event.actionMasked) {
+      MotionEvent.ACTION_DOWN -> {
+        touchOrigins.clear()
+        touches.add(doubleArrayOf(t, -1.0, 0.0))
+      }
+      MotionEvent.ACTION_MOVE -> {
+        val current = touches.lastOrNull()?.takeIf { it[1] < 0 } ?: return
+        for (i in 0 until event.pointerCount) {
+          val origin = touchOrigins[event.getPointerId(i)] ?: continue
+          val distance = Math.hypot((event.getX(i) - origin.first).toDouble(), (event.getY(i) - origin.second).toDouble())
+          current[2] = max(current[2], distance / density)
+        }
+      }
+      MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> touches.lastOrNull()?.takeIf { it[1] < 0 }?.set(1, t)
+    }
+    if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
+      touchOrigins[event.getPointerId(event.actionIndex)] = event.getX(event.actionIndex) to event.getY(event.actionIndex)
+    }
+  }
+
+  /** Sees every touch the window dispatches without consuming or changing any. */
+  private class TouchObserver(val delegate: Window.Callback, val onTouch: (MotionEvent) -> Unit) :
+    Window.Callback by delegate {
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+      onTouch(event)
+      return delegate.dispatchTouchEvent(event)
+    }
   }
 }

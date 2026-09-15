@@ -1,6 +1,7 @@
-import type { Interval, Issue, MotionReport, TargetReport } from './schema.js';
+import type { Interval, Issue, MotionProp, MotionReport, TargetReport } from './schema.js';
 
 const pct = (r: number) => `${Math.round(r * 100)}%`;
+const FADES = new Set<MotionProp>(['opacity', 'inheritedOpacity', 'contentOpacity']);
 const overlaps = (a: Interval, b: Interval) => a.endMs >= b.startMs && a.startMs <= b.endMs;
 
 /** When the target left the screen before the recording ended (unmounted), else undefined. */
@@ -35,7 +36,27 @@ export function detectIssues(report: Omit<MotionReport, 'issues'>): Issue[] {
 
     for (const s of t.segments) {
       const where = { target: t.id, prop: s.prop, atMs: s.startMs };
-      if (s.kind === 'jump') {
+      // Following a finger moves in whatever steps the finger moves, and holds while it rests.
+      if (s.gesture) {
+        if (s.droppedFrames) {
+          issues.push({
+            severity: 'warning',
+            code: 'dropped-frames',
+            ...where,
+            message: `${s.droppedFrames} display frames dropped while ${t.id}.${s.prop} followed a drag: main thread blocked`,
+          });
+        }
+        continue;
+      }
+      if (s.kind === 'jump' && s.prop === 'contentOpacity') {
+        // Content popping in (an image that loaded without a transition) is often intended.
+        issues.push({
+          severity: 'info',
+          code: 'jump',
+          ...where,
+          message: `${t.id}'s content went ${s.from} → ${s.to} opacity within one frame at ${s.startMs}ms (image loaded without a transition?)`,
+        });
+      } else if (s.kind === 'jump') {
         issues.push({
           severity: 'warning',
           code: 'jump',
@@ -84,7 +105,7 @@ export function detectIssues(report: Omit<MotionReport, 'issues'>): Issue[] {
     // that ends entirely off screen was dismissed, and a view that did not move itself (a backdrop, a
     // screen under a modal) is covered on purpose by whatever slid over it.
     const scrolled = t.segments.some((s) => s.prop === 'scrollX' || s.prop === 'scrollY');
-    const moved = t.segments.some((s) => s.prop !== 'opacity');
+    const moved = t.segments.some((s) => !FADES.has(s.prop));
     if (v.finalClipRatio < 0.99) {
       if (scrolled) {
         issues.push({

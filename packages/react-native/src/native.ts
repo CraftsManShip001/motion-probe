@@ -14,6 +14,8 @@ export interface NativeDrain {
   running: boolean;
   endReason: string;
   nominalFrameMs: number;
+  /** Every touch sequence so far as [startMs, endMs (-1 while down), distance]; probes from 0.1.4. */
+  touches?: number[][];
 }
 
 export interface NativeStartResult {

@@ -39,6 +39,7 @@ export function startRecording(targets: string[], options: RecordOptions = {}): 
 
   const frameTimes: number[] = [];
   const samples: number[][] = [];
+  let touches: number[][] | undefined;
   let firstChangeMs: number | undefined;
   let lastChangeMs = 0;
   let cancelled = false;
@@ -57,6 +58,7 @@ export function startRecording(targets: string[], options: RecordOptions = {}): 
   let startedAt = Date.now();
 
   const absorb = (drain: NativeDrain) => {
+    if (drain.touches) touches = drain.touches;
     for (const t of drain.frameTimes) frameTimes.push(t);
     for (const row of drain.samples) {
       samples.push(row);
@@ -88,6 +90,13 @@ export function startRecording(targets: string[], options: RecordOptions = {}): 
         frameTimes,
         samples,
         endReason: (drain.endReason as EndReason) || reason,
+        ...(touches && {
+          touches: touches.map(([startMs, endMs, distance]) => ({
+            startMs,
+            endMs: endMs >= 0 ? endMs : (frameTimes.at(-1) ?? startMs),
+            distance,
+          })),
+        }),
       });
     } catch (error) {
       rejectDone(error);

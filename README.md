@@ -188,6 +188,7 @@ npx motion-probe report ab12cd34 --format json
 | `translateY 0 → -120 @12ms 300ms cubic-out ≈ cubic-bezier(...)` | 구간, 시작 시점, 길이, 최근접 이징 + 피팅된 베지어 |
 | `spring overshoot 37% · crossings 3 · ζ≈0.3 · settle 820ms` | 스프링 특성(감쇠비 추정 포함) |
 | `JUMP` | 1프레임 안에 값이 바뀜 (애니메이션 누락) |
+| `follows touch (drag)` | 손가락으로 끄는 동안 따라 움직인 구간 (곡선 피팅·JUMP·멈춤 경고 없음). 손을 뗀 뒤의 release/fling 애니메이션은 별도 구간으로 곡선까지 분석 |
 | `⚠ froze 250ms` | 프레임은 나오는데 **값이 멈춤** (JS 스레드 막힘). 스프링 꼭짓점은 제외 |
 | `⚠ dropped N frames` | 디스플레이 프레임 자체가 빠짐 |
 | `clipped` | 조상 clip·스크롤 뷰포트·화면 경계에 잘린 구간. **일부만 보인 채 끝났을 때만** `⚠`와 `clipped-at-end` (슬라이드 인 중 잘림, 화면 밖으로 닫힘은 정상) |
@@ -195,6 +196,8 @@ npx motion-probe report ab12cd34 --format json
 | `visible min·final` | 잘림과 가림을 모두 반영한, 실제로 보이는 비율 |
 | `left` / `top` | 자기 transform이나 스크롤이 아니라 부모·레이아웃 때문에 이동 |
 | `scrollX` / `scrollY` | 감싸는 스크롤 뷰의 스크롤 (scrollTo 애니메이션 곡선까지) |
+| `inheritedOpacity` | 조상(화면·카드)이 페이드됨. 뷰 자신의 페이드는 `opacity` |
+| `contentOpacity` | 뷰 안에 그려지는 내용(이미지·텍스트·자식 배경)이 페이드됨: expo-image `transition` 등 이미지 페이드 인 (iOS cross-dissolve 포함). 트랜지션 없이 이미지가 튀어나온 JUMP는 info로만 표시 |
 | `issues: ...` | 스펙이 없어도 자동으로 잡은 문제 (`target-not-found`, `jump`, `stall`, `dropped-frames`, `clipped-at-end`, `occluded-at-end`, `never-settled` …) |
 
 - `--format json`: 버전이 붙은 스키마(`motion-probe/report@1`)
