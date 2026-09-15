@@ -1,6 +1,6 @@
 {
   "name": "@motion-probe/cli",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "CLI and local daemon for motion-probe: arm recordings, trigger interactions, get JSON/text/OTLP reports.",
   "license": "MIT",
   "type": "module",
@@ -21,7 +21,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@motion-probe/core": "0.1.2",
+    "@motion-probe/core": "0.1.3",
     "ws": "^8.21.3"
   },
   "keywords": ["react-native", "animation", "motion", "testing", "cli", "agent"],

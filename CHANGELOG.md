@@ -2,6 +2,27 @@
 
 All `@motion-probe/*` packages share one version.
 
+## 0.1.3
+
+Found with a third fresh app: a bare React Native app (no Expo template, no Reanimated) using
+`Animated.stagger` / `Animated.loop`, `LayoutAnimation`, FlatList scrolling, `KeyboardAvoidingView` and
+the core `<Modal>`, on iOS and Android.
+
+- **A view's own children no longer count as covering it.** Fabric can mount a view's children as
+  later siblings of it (view flattening), so the text field inside a composer, or the label of a list
+  row, was reported as covering it (`occluded-at-end`, "covered 67%"). Views lying entirely inside the
+  target are now treated as its content; overlays that reach past it are still covers.
+- **Looping animations are reported as loops.** A sustained oscillation (an `Animated.loop` pulse, a
+  breathing or shimmer effect) reads `loop 0.4 ↔ 1 · period 833ms · 3 cycles` instead of a spring with
+  a negative damping ratio.
+- Docs: installing into bare React Native apps (Expo Modules through `install-expo-modules`, and the
+  React Native versions it currently supports).
+
+Known limitation: Android window animations (the core `<Modal>`'s slide, activity transitions) run in
+the system compositor and are invisible to an in-app probe; the content's layout is still recorded.
+Observed along the way (React Native, not motion-probe): `LayoutAnimation` animated on iOS but jumped
+on Android in a bare RN 0.85 New Architecture app.
+
 ## 0.1.2
 
 Found with a second fresh app (expo-router native stack, Reanimated 4 `entering` / `exiting` / layout
