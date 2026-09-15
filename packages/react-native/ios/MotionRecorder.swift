@@ -148,8 +148,10 @@ final class MotionRecorder: NSObject {
       }
 
       let row: [Double]
-      if let view, let window = view.window {
-        row = measure(view, in: window, frame: frame, target: i, mounting: lastRows[i]?[2] != 1)
+      let mounting = lastRows[i]?[2] != 1
+      // A recycled view that was not rendered at its new place yet is not on screen this frame.
+      if let view, let window = view.window, !(mounting && isUnrendered(view.layer)) {
+        row = measure(view, in: window, frame: frame, target: i, mounting: mounting)
       } else {
         row = [Double(frame), Double(i), 0] + Array(repeating: 0, count: Self.columns.count - 3)
       }
@@ -170,7 +172,7 @@ final class MotionRecorder: NSObject {
     // Coordinate conversion only works within one layer tree, so never mix model and presentation
     // layers. The presentation tree is what is on screen; it exists once the layers were rendered.
     let usePresentation = view.layer.presentation() != nil && window.layer.presentation() != nil
-      && !(mounting && hasStalePresentation(view.layer, in: window.layer))
+      && !(mounting && hasUnrenderedAncestor(view.layer, in: window.layer))
     func onScreen(_ layer: CALayer) -> CALayer {
       usePresentation ? (layer.presentation() ?? layer) : layer
     }
@@ -222,22 +224,27 @@ final class MotionRecorder: NSObject {
     ]
   }
 
-  /// Fabric recycles native views: a reused view keeps the presentation state of its previous use (its
-  /// old size and position) until it is rendered again, while its model already has the new layout. On
-  /// the frame a view mounts, a layer whose presentation disagrees with its model without an animation
-  /// explaining it has not been rendered yet, so the model is what this frame will show.
-  private func hasStalePresentation(_ layer: CALayer, in root: CALayer) -> Bool {
+  /// A layer whose presentation disagrees with its model without an animation explaining it has a
+  /// change that was not rendered yet. Fabric recycles native views: a reused view keeps the
+  /// presentation of its previous use (its old size and position) until it is rendered again.
+  private func isUnrendered(_ layer: CALayer) -> Bool {
+    guard let presentation = layer.presentation(), (layer.animationKeys() ?? []).isEmpty else { return false }
+    return presentation.bounds != layer.bounds || presentation.position != layer.position
+      || !CATransform3DEqualToTransform(presentation.transform, layer.transform)
+  }
+
+  /// On the frame a view mounts into a still hierarchy, an unrendered ancestor (a recycled container)
+  /// means the model tree is what this frame shows. While anything in the chain animates (a pushed
+  /// screen sliding in), only the presentation tree shows where the view is.
+  private func hasUnrenderedAncestor(_ layer: CALayer, in root: CALayer) -> Bool {
+    var unrendered = false
     var current: CALayer? = layer
     while let model = current, model !== root {
-      if let presentation = model.presentation(), (model.animationKeys() ?? []).isEmpty,
-        presentation.bounds != model.bounds || presentation.position != model.position
-          || !CATransform3DEqualToTransform(presentation.transform, model.transform)
-      {
-        return true
-      }
+      if !(model.animationKeys() ?? []).isEmpty { return false }
+      if model !== layer && isUnrendered(model) { unrendered = true }
       current = model.superlayer
     }
-    return false
+    return unrendered
   }
 
   // MARK: - Content
