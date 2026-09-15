@@ -12,3 +12,6 @@ examples/demo/.expo/
 
 # motion-probe artifacts
 *.motion.json
+
+# build logs from local device runs
+*.log
