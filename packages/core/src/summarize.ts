@@ -233,6 +233,13 @@ function fitSpring(v: Float64Array, s0: number, e: number, to: number, delta: nu
   return fit;
 }
 
+/**
+ * Damping ratios tried for springs that do not overshoot. A best fit on the last one is not reported:
+ * a heavily overdamped curve is close to a plain exponential, where stiffness and damping trade off
+ * and no single spring config describes it.
+ */
+const DAMPING_RATIOS = [1, 1.1, 1.25, 1.5, 1.75, 2, 2.5];
+
 /** Step response (0 → 1) of a spring with damping ratio ζ ≥ 1 and natural frequency ω (rad/s). */
 function dampedStep(zeta: number, omega: number, s: number): number {
   if (zeta <= 1.0001) return 1 - (1 + omega * s) * Math.exp(-omega * s);
@@ -253,7 +260,7 @@ function fitDampedSpring(points: CurvePoint[], durationMs: number): { zeta: numb
     for (const { u, p } of points) sum += (dampedStep(zeta, omega, (u * durationMs) / 1000) - p) ** 2;
     return Math.sqrt(sum / points.length);
   };
-  for (const zeta of [1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]) {
+  for (const zeta of DAMPING_RATIOS) {
     for (let omega = 2; omega <= 200; omega *= 1.04) {
       const rmse = errorOf(zeta, omega);
       if (rmse < best.rmse) best = { zeta, omega, rmse };
@@ -418,7 +425,8 @@ function buildSegment(
       // A poor easing fit on a curve that never overshoots may be a critically / over-damped spring.
       if (fit.rmse > 0.02 && monotonic) {
         const damped = fitDampedSpring(points, endMs - t0);
-        if (damped.rmse < 0.02 && damped.rmse < fit.rmse * 0.6) {
+        const atEdge = damped.zeta === DAMPING_RATIOS[DAMPING_RATIOS.length - 1];
+        if (damped.rmse < 0.02 && damped.rmse < fit.rmse * 0.6 && !atEdge) {
           segment.spring = {
             dampingRatio: round(damped.zeta, 2),
             stiffness: Math.round(damped.omega ** 2),

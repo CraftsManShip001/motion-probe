@@ -148,10 +148,8 @@ final class MotionRecorder: NSObject {
       }
 
       let row: [Double]
-      let mounting = lastRows[i]?[2] != 1
-      // A recycled view that was not rendered at its new place yet is not on screen this frame.
-      if let view, let window = view.window, !(mounting && isUnrendered(view.layer)) {
-        row = measure(view, in: window, frame: frame, target: i, mounting: mounting)
+      if let view, let window = view.window {
+        row = measure(view, in: window, frame: frame, target: i, mounting: lastRows[i]?[2] != 1)
       } else {
         row = [Double(frame), Double(i), 0] + Array(repeating: 0, count: Self.columns.count - 3)
       }
@@ -169,16 +167,9 @@ final class MotionRecorder: NSObject {
   }
 
   private func measure(_ view: UIView, in window: UIWindow, frame: Int, target: Int, mounting: Bool) -> [Double] {
-    // Coordinate conversion only works within one layer tree, so never mix model and presentation
-    // layers. The presentation tree is what is on screen; it exists once the layers were rendered.
-    let usePresentation = view.layer.presentation() != nil && window.layer.presentation() != nil
-      && !(mounting && hasUnrenderedAncestor(view.layer, in: window.layer))
-    func onScreen(_ layer: CALayer) -> CALayer {
-      usePresentation ? (layer.presentation() ?? layer) : layer
-    }
-    let layer = onScreen(view.layer)
-    let windowLayer = onScreen(window.layer)
-    let rect = layer.convert(layer.bounds, to: windowLayer)
+    let space = ScreenSpace(window: window.layer, checkStale: mounting)
+    let layer = space.onScreen(view.layer)
+    let rect = space.rect(of: view.layer)
 
     let m = layer.transform
     let translateX = Double(m.m41)
@@ -188,15 +179,15 @@ final class MotionRecorder: NSObject {
     let rotation = Double(atan2(m.m12, m.m11)) * 180 / .pi
 
     var effectiveOpacity = view.isHidden ? 0 : Double(layer.opacity)
-    var clip = windowLayer.bounds
+    var clip = space.onScreen(window.layer).bounds
     var scrollX = 0.0
     var scrollY = 0.0
     var ancestor = view.superview
     while let a = ancestor {
-      let al = onScreen(a.layer)
+      let al = space.onScreen(a.layer)
       effectiveOpacity *= a.isHidden ? 0 : Double(al.opacity)
       if a.clipsToBounds || a.layer.masksToBounds {
-        clip = clip.intersection(al.convert(al.bounds, to: windowLayer))
+        clip = clip.intersection(space.rect(of: a.layer))
       }
       // A shifted bounds origin is a scroll offset (UIScrollView.contentOffset).
       scrollX += Double(al.bounds.origin.x)
@@ -208,9 +199,7 @@ final class MotionRecorder: NSObject {
     let visible = rect.intersection(clip)
     let hasVisibleArea = area > 0 && !visible.isNull && visible.width > 0 && visible.height > 0
     let visibleRatio = hasVisibleArea ? Double(visible.width * visible.height / area) : 0
-    let occluded = hasVisibleArea
-      ? occludedRatio(of: view, visibleRect: visible, windowLayer: windowLayer, onScreen: onScreen)
-      : 0
+    let occluded = hasVisibleArea ? occludedRatio(of: view, visibleRect: visible, space: space) : 0
 
     return [
       Double(frame), Double(target), 1,
@@ -219,32 +208,8 @@ final class MotionRecorder: NSObject {
       translateX, translateY, scaleX, scaleY, rotation,
       Double(layer.opacity), effectiveOpacity, visibleRatio,
       occluded, scrollX, scrollY,
-      contentOpacity(
-        of: view, target: target, own: rect.insetBy(dx: -1, dy: -1), windowLayer: windowLayer, onScreen: onScreen),
+      contentOpacity(of: view, target: target, own: rect.insetBy(dx: -1, dy: -1), space: space),
     ]
-  }
-
-  /// A layer whose presentation disagrees with its model without an animation explaining it has a
-  /// change that was not rendered yet. Fabric recycles native views: a reused view keeps the
-  /// presentation of its previous use (its old size and position) until it is rendered again.
-  private func isUnrendered(_ layer: CALayer) -> Bool {
-    guard let presentation = layer.presentation(), (layer.animationKeys() ?? []).isEmpty else { return false }
-    return presentation.bounds != layer.bounds || presentation.position != layer.position
-      || !CATransform3DEqualToTransform(presentation.transform, layer.transform)
-  }
-
-  /// On the frame a view mounts into a still hierarchy, an unrendered ancestor (a recycled container)
-  /// means the model tree is what this frame shows. While anything in the chain animates (a pushed
-  /// screen sliding in), only the presentation tree shows where the view is.
-  private func hasUnrenderedAncestor(_ layer: CALayer, in root: CALayer) -> Bool {
-    var unrendered = false
-    var current: CALayer? = layer
-    while let model = current, model !== root {
-      if !(model.animationKeys() ?? []).isEmpty { return false }
-      if model !== layer && isUnrendered(model) { unrendered = true }
-      current = model.superlayer
-    }
-    return unrendered
   }
 
   // MARK: - Content
@@ -254,20 +219,14 @@ final class MotionRecorder: NSObject {
   /// (1 − Π(1 − alpha)). The view's own background is not content, so an image fading in over a
   /// placeholder color counts. Cross-dissolve transitions (UIView.transition, which image libraries
   /// use to fade images in) blend from the content shown before them.
-  private func contentOpacity(
-    of view: UIView,
-    target: Int,
-    own: CGRect,
-    windowLayer: CALayer,
-    onScreen: (CALayer) -> CALayer
-  ) -> Double {
+  private func contentOpacity(of view: UIView, target: Int, own: CGRect, space: ScreenSpace) -> Double {
     var clear = 1.0
     var budget = Self.contentBudget
     var pieces: [ObjectIdentifier: Double] = [:]
     func visit(_ v: UIView, inherited: Double, isTarget: Bool) {
       guard budget > 0, clear > 0.001, !v.isHidden else { return }
       budget -= 1
-      let layer = onScreen(v.layer)
+      let layer = space.onScreen(v.layer)
       let alpha = isTarget ? 1 : inherited * Double(layer.opacity)
       guard alpha >= 0.001 else { return }
       let draws = isTarget ? layer.contents != nil : paintsOpaqueContent(layer)
@@ -283,8 +242,7 @@ final class MotionRecorder: NSObject {
     // it (view flattening): what lies inside the view and is painted after it is its content too.
     if let parent = view.superview, let index = parent.subviews.firstIndex(where: { $0 === view }) {
       for sibling in parent.subviews[(index + 1)...] {
-        let layer = onScreen(sibling.layer)
-        if own.contains(layer.convert(layer.bounds, to: windowLayer)) {
+        if own.contains(space.rect(of: sibling.layer)) {
           visit(sibling, inherited: 1, isTarget: false)
         }
       }
@@ -347,19 +305,13 @@ final class MotionRecorder: NSObject {
   /// or of any ancestor. Fabric mounts children already sorted by zIndex, so subview order is paint
   /// order. Only views with an opaque-ish background, image or drawn content count as covers; the
   /// covered area is estimated on an `occlusionGrid`² sample grid.
-  private func occludedRatio(
-    of view: UIView,
-    visibleRect: CGRect,
-    windowLayer: CALayer,
-    onScreen: (CALayer) -> CALayer
-  ) -> Double {
+  private func occludedRatio(of view: UIView, visibleRect: CGRect, space: ScreenSpace) -> Double {
     guard occlusionGrid > 0 else { return 0 }
     var covers: [CGRect] = []
     var budget = Self.occluderBudget
     // Fabric can mount a view's children as later siblings (view flattening), so anything lying
     // entirely inside the target is its own content, not something covering it.
-    let ownLayer = onScreen(view.layer)
-    let own = ownLayer.convert(ownLayer.bounds, to: windowLayer).insetBy(dx: -1, dy: -1)
+    let own = space.rect(of: view.layer).insetBy(dx: -1, dy: -1)
     var child = view
     while let parent = child.superview {
       var paintedAfter = false
@@ -367,7 +319,7 @@ final class MotionRecorder: NSObject {
         if sibling === child {
           paintedAfter = true
         } else if paintedAfter {
-          collectCovers(sibling, target: visibleRect, own: own, windowLayer: windowLayer, onScreen: onScreen, covers: &covers, budget: &budget)
+          collectCovers(sibling, target: visibleRect, own: own, space: space, covers: &covers, budget: &budget)
         }
       }
       child = parent
@@ -392,17 +344,16 @@ final class MotionRecorder: NSObject {
     _ view: UIView,
     target: CGRect,
     own: CGRect,
-    windowLayer: CALayer,
-    onScreen: (CALayer) -> CALayer,
+    space: ScreenSpace,
     covers: inout [CGRect],
     budget: inout Int
   ) {
     guard budget > 0, !view.isHidden else { return }
     budget -= 1
-    let layer = onScreen(view.layer)
+    let layer = space.onScreen(view.layer)
     guard layer.opacity >= 0.01 else { return }
 
-    let rect = layer.convert(layer.bounds, to: windowLayer)
+    let rect = space.rect(of: view.layer)
     let intersects = rect.intersects(target)
     let clipsChildren = view.clipsToBounds || view.layer.masksToBounds
     if intersects && !own.contains(rect) && layer.opacity >= 0.5 && paintsOpaqueContent(layer) {
@@ -411,7 +362,7 @@ final class MotionRecorder: NSObject {
     }
     if clipsChildren && !intersects { return }
     for subview in view.subviews {
-      collectCovers(subview, target: target, own: own, windowLayer: windowLayer, onScreen: onScreen, covers: &covers, budget: &budget)
+      collectCovers(subview, target: target, own: own, space: space, covers: &covers, budget: &budget)
     }
   }
 
@@ -542,4 +493,44 @@ final class TouchObserver: UIGestureRecognizer {
 
   override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
   override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+}
+
+/// Where layers are on screen. The presentation tree is what was rendered, running animations
+/// included. But a layer that was not rendered yet (a view that just mounted) has no presentation, and
+/// a view Fabric recycled keeps the presentation of its previous use (old size and position) until it
+/// is rendered again. Conversion only works within one tree, so a rect climbs the model tree up to the
+/// first ancestor rendered in place and continues in the presentation tree from there: a new screen's
+/// title slides in with the screen instead of sitting at its final position.
+private struct ScreenSpace {
+  let window: CALayer
+  /// Also distrust presentations that disagree with their model with no animation explaining it. Only
+  /// on the frame a view appears: afterwards such a difference is a change about to be rendered.
+  let checkStale: Bool
+
+  /// The layer as rendered, or nil when it was not rendered as it is now.
+  func rendered(_ layer: CALayer) -> CALayer? {
+    guard let presentation = layer.presentation() else { return nil }
+    if checkStale, (layer.animationKeys() ?? []).isEmpty,
+      presentation.bounds != layer.bounds || presentation.position != layer.position
+        || !CATransform3DEqualToTransform(presentation.transform, layer.transform)
+    {
+      return nil
+    }
+    return presentation
+  }
+
+  func onScreen(_ layer: CALayer) -> CALayer { rendered(layer) ?? layer }
+
+  /// The layer's bounds in window coordinates.
+  func rect(of layer: CALayer) -> CGRect {
+    var anchor = layer
+    while rendered(anchor) == nil, anchor !== window, let superlayer = anchor.superlayer {
+      anchor = superlayer
+    }
+    guard let anchorOnScreen = rendered(anchor), let windowOnScreen = window.presentation() else {
+      return layer.convert(layer.bounds, to: window)
+    }
+    let local = anchor === layer ? anchorOnScreen.bounds : layer.convert(layer.bounds, to: anchor)
+    return anchorOnScreen.convert(local, to: windowOnScreen)
+  }
 }
