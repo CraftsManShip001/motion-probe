@@ -145,7 +145,7 @@ class MotionRecorder : Choreographer.FrameCallback {
         }
       }
 
-      val row = if (view != null) measure(view, frame, i) else absentRow(frame, i)
+      val row = if (view != null && !hasPendingAnimation(view)) measure(view, frame, i) else absentRow(frame, i)
       val last = lastRows[i]
       if (last == null) {
         lastRows[i] = row
@@ -168,8 +168,7 @@ class MotionRecorder : Choreographer.FrameCallback {
 
     var current: View = view
     while (current !== rootView) {
-      current.matrix.mapRect(rect)
-      rect.offset(current.left.toFloat(), current.top.toFloat())
+      effectiveOpacity *= mapToParent(current, rect)
       val parent = current.parent as? View ?: break
       rect.offset(-parent.scrollX.toFloat(), -parent.scrollY.toFloat())
       scrollX += parent.scrollX
@@ -274,12 +273,48 @@ class MotionRecorder : Choreographer.FrameCallback {
     return view is ImageView && view.drawable != null
   }
 
+  /**
+   * Maps a rect from `view`'s coordinates into its parent's the way View.draw does: the view's own
+   * transform, then a running legacy view animation, then its position. Legacy animations
+   * (android.view.animation, used for fragment and native-stack screen transitions) transform the view
+   * at draw time without touching its properties, so they have to be applied explicitly.
+   * Returns the animation's alpha (1 without one).
+   */
+  private fun mapToParent(view: View, rect: RectF): Float {
+    view.matrix.mapRect(rect)
+    var alpha = 1f
+    val animation = view.animation
+    if (animation != null && animation.hasStarted() && !animation.hasEnded()) {
+      val transformation = android.view.animation.Transformation()
+      animation.getTransformation(view.drawingTime, transformation)
+      val type = transformation.transformationType
+      if (type and android.view.animation.Transformation.TYPE_MATRIX != 0) transformation.matrix.mapRect(rect)
+      if (type and android.view.animation.Transformation.TYPE_ALPHA != 0) alpha = transformation.alpha
+    }
+    rect.offset(view.left.toFloat(), view.top.toFloat())
+    return alpha
+  }
+
+  /**
+   * A legacy animation that is scheduled but not drawn yet (a screen that was just pushed) starts at
+   * the next draw, so this frame shows its first animation frame, not the untransformed view. Treat the
+   * view as not on screen until then instead of recording a position it never had.
+   */
+  private fun hasPendingAnimation(view: View): Boolean {
+    var current: View? = view
+    while (current != null) {
+      val animation = current.animation
+      if (animation != null && !animation.hasStarted()) return true
+      current = current.parent as? View
+    }
+    return false
+  }
+
   private fun boundsInRoot(view: View, rootView: View): RectF {
     val rect = RectF(0f, 0f, view.width.toFloat(), view.height.toFloat())
     var current: View = view
     while (current !== rootView) {
-      current.matrix.mapRect(rect)
-      rect.offset(current.left.toFloat(), current.top.toFloat())
+      mapToParent(current, rect)
       val parent = current.parent as? View ?: break
       rect.offset(-parent.scrollX.toFloat(), -parent.scrollY.toFloat())
       current = parent
