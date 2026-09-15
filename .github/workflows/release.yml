@@ -34,7 +34,11 @@ jobs:
             if [ "v$v" != "$GITHUB_REF_NAME" ]; then echo "::error::@motion-probe/$p is $v, tag is $GITHUB_REF_NAME"; exit 1; fi
           done
       - name: Publish (dependencies first; skips versions already on npm)
+        env:
+          # Verbose logs include the OIDC token exchange, which is where a trusted-publisher mismatch shows up.
+          NPM_CONFIG_LOGLEVEL: verbose
         run: |
+          npm --version
           for p in core cli mcp react-native; do
             v=$(node -p "require('./packages/$p/package.json').version")
             if npm view "@motion-probe/$p@$v" version >/dev/null 2>&1; then
