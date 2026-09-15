@@ -186,7 +186,7 @@ npx motion-probe report ab12cd34 --format json
 | 표시 | 의미 |
 |---|---|
 | `translateY 0 → -120 @12ms 300ms cubic-out ≈ cubic-bezier(...)` | 구간, 시작 시점, 길이, 최근접 이징 + 피팅된 베지어 |
-| `spring overshoot 37% · crossings 3 · ζ≈0.3 · settle 820ms` | 스프링 특성(감쇠비 추정 포함) |
+| `spring overshoot 37% · crossings 3 · ζ≈0.3 · settle 820ms` | 스프링 특성(감쇠비 추정 포함). 오버슈트 없는 임계·과감쇠 스프링(Reanimated 4 기본 `withSpring`)도 `ζ≈1 · ≈ stiffness 219 damping 29.6 @ mass 1`처럼 인식 |
 | `JUMP` | 1프레임 안에 값이 바뀜 (애니메이션 누락) |
 | `follows touch (drag)` | 손가락으로 끄는 동안 따라 움직인 구간 (곡선 피팅·JUMP·멈춤 경고 없음). 손을 뗀 뒤의 release/fling 애니메이션은 별도 구간으로 곡선까지 분석 |
 | `⚠ froze 250ms` | 프레임은 나오는데 **값이 멈춤** (JS 스레드 막힘). 스프링 꼭짓점은 제외 |
