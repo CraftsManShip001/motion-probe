@@ -82,6 +82,8 @@ useEffect(
 
 검증할 뷰에 `testID`만 있으면 됩니다. 네이티브 코드가 들어가므로 앱을 한 번 다시 빌드해야 하고, Expo Go에서는 동작하지 않습니다. iOS 모듈은 Debug 구성에만 등록됩니다(`debugOnly`).
 
+Expo를 쓰지 않는 bare React Native 앱은 Expo Modules가 먼저 필요합니다(`npx install-expo-modules@latest` 후 `npm install @motion-probe/react-native`, `pod install`). 이때 앱의 React Native 버전을 지원하는 Expo SDK가 있어야 합니다. 예를 들어 Expo SDK 57은 RN 0.86까지 지원하므로, 막 나온 RN 0.87 앱에서는 `install-expo-modules`가 "Unable to find compatible Expo SDK version"으로 실패합니다.
+
 ### 2. 녹화 + 트리거 + 판정
 
 ```sh
