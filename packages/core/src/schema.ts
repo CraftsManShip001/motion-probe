@@ -127,7 +127,18 @@ export interface SpringFit {
   damping?: number;
 }
 
+/** A sustained oscillation (pulse, breathing, shimmer): swings that do not decay. */
+export interface SegmentLoop {
+  min: number;
+  max: number;
+  periodMs: number;
+  /** Cycles observed in the recording (a loop that never stops is also reported as never-settled). */
+  cycles: number;
+}
+
 export interface Segment {
+  /** Present when the segment is a repeating loop rather than a single animation. */
+  loop?: SegmentLoop;
   prop: MotionProp;
   /** `jump` = the value changed within a single frame. */
   kind: 'animation' | 'jump';
