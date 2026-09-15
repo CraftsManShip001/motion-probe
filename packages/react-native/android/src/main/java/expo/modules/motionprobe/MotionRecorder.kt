@@ -210,6 +210,9 @@ class MotionRecorder : Choreographer.FrameCallback {
     if (occlusionGrid <= 0) return 0.0
     val covers = ArrayList<RectF>()
     val budget = intArrayOf(OCCLUDER_BUDGET)
+    // Fabric can mount a view's children as later siblings (view flattening), so anything lying
+    // entirely inside the target is its own content, not something covering it.
+    val own = boundsInRoot(view, rootView).apply { inset(-1f, -1f) }
     var child: View = view
     var parent = child.parent as? ViewGroup
     while (parent != null) {
@@ -219,7 +222,7 @@ class MotionRecorder : Choreographer.FrameCallback {
         if (i == childIndex) continue
         val sibling = parent.getChildAt(i)
         val paintedAfter = sibling.z > child.z || (sibling.z == child.z && positions[i] > positions[childIndex])
-        if (paintedAfter) collectCovers(sibling, visible, rootView, covers, budget)
+        if (paintedAfter) collectCovers(sibling, visible, own, rootView, covers, budget)
       }
       if (parent === rootView) break
       child = parent
@@ -251,19 +254,19 @@ class MotionRecorder : Choreographer.FrameCallback {
     return positions
   }
 
-  private fun collectCovers(view: View, target: RectF, rootView: View, covers: MutableList<RectF>, budget: IntArray) {
+  private fun collectCovers(view: View, target: RectF, own: RectF, rootView: View, covers: MutableList<RectF>, budget: IntArray) {
     if (budget[0] <= 0 || view.visibility != View.VISIBLE || view.alpha < 0.01f) return
     budget[0]--
     val rect = boundsInRoot(view, rootView)
     val intersects = RectF.intersects(rect, target)
     val clips = clipsChildren(view)
-    if (intersects && view.alpha >= 0.5f && paintsOpaqueContent(view)) {
+    if (intersects && !own.contains(rect) && view.alpha >= 0.5f && paintsOpaqueContent(view)) {
       covers.add(RectF(rect).apply { intersect(target) })
       if (clips) return
     }
     if (clips && !intersects) return
     if (view is ViewGroup) {
-      for (i in 0 until view.childCount) collectCovers(view.getChildAt(i), target, rootView, covers, budget)
+      for (i in 0 until view.childCount) collectCovers(view.getChildAt(i), target, own, rootView, covers, budget)
     }
   }
 
