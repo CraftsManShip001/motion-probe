@@ -6,6 +6,7 @@ const span = (i: { startMs: number; endMs: number }) =>
   i.startMs === i.endMs ? `@${i.startMs}ms (1 frame)` : `${i.startMs}–${i.endMs}ms`;
 
 function formatCurve(s: Segment): string {
+  if (s.gesture) return 'follows touch (drag)';
   if (s.kind === 'jump') return 'JUMP (changed within 1 frame)';
   if (s.loop) return `loop ${s.loop.min} ↔ ${s.loop.max} · period ${s.loop.periodMs}ms · ${s.loop.cycles} cycles`;
   if (s.spring) {

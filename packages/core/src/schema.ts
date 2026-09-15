@@ -29,6 +29,11 @@ export const SAMPLE_COLUMNS = [
   /** Sum of ancestor scroll offsets (content offset of enclosing scroll views). */
   'scrollX',
   'scrollY',
+  /**
+   * Opacity of what the view draws inside itself (descendant images, text and backgrounds, and
+   * cross-dissolve transitions), relative to the view; 0 while it draws nothing.
+   */
+  'contentOpacity',
 ] as const;
 export type SampleColumn = (typeof SAMPLE_COLUMNS)[number];
 
@@ -56,6 +61,17 @@ export interface RawTrace {
   frameTimes: number[];
   samples: number[][];
   endReason: EndReason;
+  /** When a finger was on the screen (probes from 0.1.4). */
+  touches?: TouchInterval[];
+}
+
+/** A touch sequence: from the first finger down to the last finger up. */
+export interface TouchInterval {
+  startMs: number;
+  /** Last finger up; the end of the recording when still touching. */
+  endMs: number;
+  /** Farthest any finger moved from where it went down (points / dp): a press barely moves, a drag does. */
+  distance: number;
 }
 
 /**
@@ -63,6 +79,9 @@ export interface RawTrace {
  * - `left`/`top`: layout position, compensated for the view's own transform and for scrolling, so
  *   they only move when a parent or layout moved the view.
  * - `scrollX`/`scrollY`: scrolling of the enclosing scroll views.
+ * - `inheritedOpacity`: combined opacity of the ancestors (a screen or card fading in), without the
+ *   view's own `opacity`.
+ * - `contentOpacity`: opacity of what the view draws inside itself (an image fading in).
  */
 export const MOTION_PROPS = [
   'translateX',
@@ -71,6 +90,8 @@ export const MOTION_PROPS = [
   'scaleY',
   'rotation',
   'opacity',
+  'inheritedOpacity',
+  'contentOpacity',
   'boundsWidth',
   'boundsHeight',
   'left',
@@ -88,6 +109,8 @@ export const DEFAULT_EPSILON: Record<MotionProp, number> = {
   scaleY: 0.005,
   rotation: 0.5,
   opacity: 0.01,
+  inheritedOpacity: 0.01,
+  contentOpacity: 0.01,
   boundsWidth: 0.5,
   boundsHeight: 0.5,
   left: 0.5,
@@ -142,6 +165,11 @@ export interface Segment {
   prop: MotionProp;
   /** `jump` = the value changed within a single frame. */
   kind: 'animation' | 'jump';
+  /**
+   * The value changed while a finger dragged (the view follows the touch): no curve is fitted. What
+   * happens after the finger lifts (a release or fling animation) is a separate segment.
+   */
+  gesture?: boolean;
   from: number;
   to: number;
   startMs: number;

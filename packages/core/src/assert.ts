@@ -81,6 +81,8 @@ const VALUE_TOLERANCE: Record<MotionProp, number> = {
   scaleY: 0.01,
   rotation: 1,
   opacity: 0.02,
+  inheritedOpacity: 0.02,
+  contentOpacity: 0.02,
 };
 
 const pct = (r: number) => `${Math.round(r * 100)}%`;
@@ -97,8 +99,13 @@ function matches(e: NumberExpectation, actual: number, defaultTolerance: number)
   return (e.min === undefined || actual >= e.min) && (e.max === undefined || actual <= e.max);
 }
 
-/** Closest segment by from/to when given, else the largest one; animations win ties over jumps. */
-function pickSegment(candidates: Segment[], exp: Expectation): Segment | undefined {
+/**
+ * Closest segment by from/to when given, else the largest one; animations win ties over jumps. Motion
+ * that followed a drag is only compared when nothing else moved (expectations describe animations).
+ */
+function pickSegment(all: Segment[], exp: Expectation): Segment | undefined {
+  const animated = all.filter((s) => !s.gesture);
+  const candidates = animated.length ? animated : all;
   const byValue = exp.from !== undefined || exp.to !== undefined;
   const score = (s: Segment) =>
     byValue

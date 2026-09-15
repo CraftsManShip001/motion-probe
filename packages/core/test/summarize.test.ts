@@ -6,6 +6,147 @@ const cubicOut = NAMED_EASINGS['cubic-out'].fn;
 const linear = NAMED_EASINGS.linear.fn;
 
 describe('summarize', () => {
+  it('reports an ancestor fading (a screen fading in) as inheritedOpacity', () => {
+    const trace = synthesize({
+      durationMs: 800,
+      targets: [
+        { id: 'title', at: (t) => ({ effectiveOpacity: timing(t, 100, 300, 0, 1, cubicOut) }) },
+        { id: 'self', at: (t) => ({ opacity: timing(t, 100, 300, 0, 1, cubicOut) }) },
+      ],
+    });
+    const [title, self] = summarize(trace).targets;
+    const inherited = title.segments.find((s) => s.prop === 'inheritedOpacity')!;
+    expect(inherited).toMatchObject({ kind: 'animation', from: 0, to: 1 });
+    expect(inherited.easing?.name).toBe('cubic-out');
+    expect(title.segments.some((s) => s.prop === 'opacity')).toBe(false);
+    // A view fading itself is not reported twice.
+    expect(self.segments.map((s) => s.prop)).toEqual(['opacity']);
+  });
+
+  it('reports content fading in inside the view (an image transition) as contentOpacity', () => {
+    const trace = synthesize({
+      durationMs: 800,
+      targets: [
+        { id: 'image', at: (t) => ({ contentOpacity: timing(t, 100, 300, 0, 1, cubicOut) }) },
+        { id: 'plain', at: (t) => ({ contentOpacity: t < 200 ? 0 : 1 }) },
+      ],
+    });
+    const report = summarize(trace);
+    const fade = report.targets[0].segments.find((s) => s.prop === 'contentOpacity')!;
+    expect(fade).toMatchObject({ kind: 'animation', from: 0, to: 1 });
+    expect(fade.durationMs).toBeGreaterThan(270);
+    expect(fade.durationMs).toBeLessThan(320);
+    // An image popping in without a transition is listed, not flagged.
+    const jump = report.issues.find((i) => i.target === 'plain' && i.code === 'jump')!;
+    expect(jump.severity).toBe('info');
+    expect(formatReport(report)).not.toContain('issues:');
+  });
+
+  it('recognizes a spring that does not overshoot (Reanimated 4 default withSpring)', () => {
+    // stiffness 900, damping 120, mass 4: ζ = 1, ω = 15 rad/s (stiffness 225, damping 30 at mass 1).
+    const omega = 15;
+    const trace = synthesize({
+      durationMs: 1200,
+      targets: [
+        {
+          id: 'card',
+          at: (t) => {
+            const s = Math.max(0, t - 100) / 1000;
+            const x = 1 - (1 + omega * s) * Math.exp(-omega * s);
+            return { translateX: 100 * (x > 0.999 ? 1 : x) };
+          },
+        },
+      ],
+    });
+    const seg = summarize(trace).targets[0].segments[0];
+    expect(seg.spring?.dampingRatio).toBe(1);
+    expect(seg.spring?.stiffness).toBeGreaterThan(190);
+    expect(seg.spring?.stiffness).toBeLessThan(260);
+    expect(formatReport(summarize(trace))).toContain('≈ stiffness');
+  });
+
+  it('separates motion that follows a drag from the release animation', () => {
+    // Finger down at 100ms, drags the card 200pt until 250ms, then a 250ms release animation to 500.
+    const trace = synthesize({
+      durationMs: 900,
+      touches: [{ startMs: 100, endMs: 250, distance: 200 }],
+      targets: [
+        {
+          id: 'card',
+          at: (t) => ({
+            translateX: t < 250 ? timing(t, 100, 150, 0, 200, linear) : timing(t, 250, 250, 200, 500, cubicOut),
+          }),
+        },
+      ],
+    });
+    const report = summarize(trace);
+    const [drag, release] = report.targets[0].segments;
+    expect(drag).toMatchObject({ prop: 'translateX', gesture: true, from: 0, to: 200 });
+    expect(drag.easing).toBeUndefined();
+    expect(release).toMatchObject({ prop: 'translateX', from: 200, to: 500 });
+    expect(release.gesture).toBeUndefined();
+    expect(release.startMs).toBeCloseTo(250, -1);
+    expect(release.easing?.name).toBe('cubic-out');
+    expect(formatReport(report)).toContain('follows touch');
+    expect(report.issues).toEqual([]);
+  });
+
+  it('splits a press animation from the release animation at the finger lifting', () => {
+    // Pressed at 50ms (scale down over 100ms), held until 400ms, spring back on release: the still
+    // hold is shorter than the gap that normally separates animations.
+    const trace = synthesize({
+      durationMs: 1200,
+      touches: [{ startMs: 40, endMs: 400, distance: 0 }],
+      targets: [
+        {
+          id: 'button',
+          at: (t) => {
+            const scale = t < 400 ? timing(t, 50, 100, 1, 0.95, cubicOut) : timing(t, 400, 300, 0.95, 1, cubicOut);
+            return { scaleX: scale, scaleY: scale };
+          },
+        },
+      ],
+    });
+    const scaleX = summarize(trace).targets[0].segments.filter((s) => s.prop === 'scaleX');
+    // (The synthetic trace drops sub-0.001 steps, so the release settles at 0.999.)
+    expect(scaleX.map((s) => [s.from, Math.round(s.to * 100) / 100, !!s.gesture])).toEqual([
+      [1, 0.95, false],
+      [0.95, 1, false],
+    ]);
+    expect(scaleX[0].easing?.name).toBe('cubic-out');
+  });
+
+  it('ignores content drawn on the first frames of a view that mounts', () => {
+    // iOS renders a Text's glyphs one frame after the view appears.
+    const trace = synthesize({
+      durationMs: 500,
+      targets: [{ id: 'title', at: (t) => (t < 100 ? null : { contentOpacity: t < 118 ? 0 : 1 }) }],
+    });
+    const report = summarize(trace);
+    expect(report.targets[0].segments).toEqual([]);
+    expect(report.issues).toEqual([]);
+  });
+
+  it('analyzes traces from probes that did not record contentOpacity', () => {
+    const trace = synthesize({
+      durationMs: 500,
+      targets: [{ id: 'card', at: (t) => ({ translateX: timing(t, 100, 200, 0, 50, cubicOut) }) }],
+    });
+    const n = trace.columns.indexOf('contentOpacity');
+    const old = { ...trace, columns: trace.columns.slice(0, n), samples: trace.samples.map((r) => r.slice(0, n)) };
+    expect(summarize(old).targets[0].segments.map((s) => s.prop)).toEqual(['translateX']);
+  });
+
+  it('does not count fades as movement when judging covered views', () => {
+    const trace = synthesize({
+      durationMs: 600,
+      targets: [{ id: 'backdrop', at: (t) => ({ effectiveOpacity: timing(t, 100, 200, 0, 1, linear), occludedRatio: 0.5 }) }],
+    });
+    const codes = summarize(trace).issues.map((i) => i.code);
+    expect(codes).toContain('covered-at-end');
+    expect(codes).not.toContain('occluded-at-end');
+  });
+
   it('extracts from/to, duration and easing of a timing animation', () => {
     const trace = synthesize({
       durationMs: 800,

@@ -17,6 +17,7 @@ export interface ViewState {
   occludedRatio?: number;
   scrollX?: number;
   scrollY?: number;
+  contentOpacity?: number;
 }
 
 export interface SyntheticTarget {
@@ -35,6 +36,7 @@ export function synthesize(options: {
   fps?: number;
   /** Frames (by time) the display skipped, e.g. main-thread blocked. */
   skip?: (t: number) => boolean;
+  touches?: RawTrace['touches'];
 }): RawTrace {
   const interval = 1000 / (options.fps ?? 60);
   const frameTimes: number[] = [];
@@ -73,6 +75,7 @@ export function synthesize(options: {
             state.occludedRatio ?? 0,
             state.scrollX ?? 0,
             state.scrollY ?? 0,
+            state.contentOpacity ?? 1,
           ]
         : [frame, ti, 0, ...new Array(SAMPLE_COLUMNS.length - 3).fill(0)];
       const prev = last[ti];
@@ -97,6 +100,7 @@ export function synthesize(options: {
     frameTimes,
     samples,
     endReason: 'settled',
+    ...(options.touches && { touches: options.touches }),
   };
 }
 
