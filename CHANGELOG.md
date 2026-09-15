@@ -32,9 +32,14 @@ away with react-native-gesture-handler + Reanimated, a press-and-hold scale, exp
   inside itself (images, text and backgrounds of its descendants, blended through cross-dissolves), so
   the fade reads `contentOpacity 0 → 1 … 300ms`. A content JUMP (an image appearing without a
   transition) is info, not a warning.
-- **No phantom jump when a recycled view mounts (iOS).** Fabric reuses native views; a reused view kept
-  its previous frame in the presentation layer until it was first rendered, so a freshly mounted view
-  was reported as `JUMP` from its old size and position (e.g. from a full-screen container to 96×96).
+- **Views that just mounted are measured where they are (iOS).** A view that was not rendered yet has
+  no presentation layer, so the whole measurement fell back to the model tree, where an animating
+  ancestor is already at its end: the title of a pushed native-stack screen was recorded at its final
+  position for one frame before sliding in (`left 20 → 20 · returns to start`). And Fabric recycles
+  native views; a reused view kept its previous frame in the presentation layer until it was rendered
+  again, so it was reported as `JUMP` from its old size and position (e.g. from a full-screen container
+  to 96×96). Rects now climb the model tree only up to the first ancestor rendered in place and use the
+  presentation tree from there.
 - **Transparent React Native backgrounds no longer count as opaque (Android).** RN keeps a view's
   background, borders and radii in one layer drawable that reports full alpha even without a background
   color, so a view with only a `borderRadius` counted as painted content (and as a cover for occlusion).
