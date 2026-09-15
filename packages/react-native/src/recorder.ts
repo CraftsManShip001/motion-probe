@@ -115,7 +115,9 @@ export function startRecording(targets: string[], options: RecordOptions = {}): 
   };
 
   const armed = native
-    .start(targets, { maxDurationMs, resolveEveryFrames: 6, occlusionGrid: options.occlusionGrid ?? 6 })
+    // Look for targets that are not on screen yet on every frame, so a view that mounts (a modal, the
+    // next screen of a stack) is recorded from its first frame instead of up to 100ms late.
+    .start(targets, { maxDurationMs, resolveEveryFrames: 1, occlusionGrid: options.occlusionGrid ?? 6 })
     .then((result) => {
       startedAt = result.startedAt;
       timer = setInterval(poll, pollMs);
